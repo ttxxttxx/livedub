@@ -11,69 +11,52 @@ export class TtsEngine {
     this.rate = config.rate ?? TTS_CONF.DEFAULT_RATE;
     this.pitch = config.pitch ?? TTS_CONF.DEFAULT_PITCH;
     this.lang = config.lang ?? TTS_CONF.DEFAULT_LANG;
-
-    // The selected voice instance
+    this._voiceId = config.voiceId ?? TTS_CONF.DEFAULT_VOICE; // 'auto' or specific name
     this._voice = null;
-
-    // Promise that resolves when all pending speech is done
-    this._pendingResolve = null;
     this._pendingCount = 0;
-
-    // Initialize voices (may load async)
+    this._allVoices = [];
     this._initVoices();
   }
 
-  /**
-   * Initialize voice list. On Edge, voices may load asynchronously.
-   */
   _initVoices() {
-    const populate = () => {
-      const voices = speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        this._selectBestVoice(voices);
-      }
+    const select = () => {
+      this._allVoices = speechSynthesis.getVoices();
+      if (this._allVoices.length > 0) this._applyVoice();
     };
-
-    populate();
-
-    // Listen for async voice loading (Edge behavior)
-    speechSynthesis.addEventListener('voiceschanged', () => {
-      const voices = speechSynthesis.getVoices();
-      this._selectBestVoice(voices);
-    });
+    select();
+    speechSynthesis.addEventListener('voiceschanged', select);
   }
 
-  /**
-   * Select the best available Chinese voice.
-   * Prioritizes Edge's Microsoft neural voices.
-   */
-  _selectBestVoice(voices) {
-    if (!voices || voices.length === 0) return;
+  /** Set voice by id ('auto' = best neural, or specific name like 'Microsoft Yunxi') */
+  setVoice(voiceId) {
+    this._voiceId = voiceId;
+    this._applyVoice();
+  }
 
-    // Try preferred voices in order
-    for (const preferred of TTS_CONF.PREFERRED_VOICES) {
-      const match = voices.find(v => v.name.includes(preferred));
-      if (match) {
-        this._voice = match;
-        console.log(`${LOG_PREFIX} [TTS] Selected voice: ${match.name} (${match.lang})`);
-        return;
-      }
+  getVoice() { return this._voiceId; }
+  getAvailableVoices() { return this._allVoices; }
+
+  _applyVoice() {
+    const voices = this._allVoices;
+    if (!voices.length) return;
+
+    if (this._voiceId && this._voiceId !== 'auto') {
+      const match = voices.find(v => v.name === this._voiceId);
+      if (match) { this._voice = match; return; }
     }
 
-    // Fallback: any Chinese voice
-    const zhVoice = voices.find(v =>
-      v.lang.startsWith('zh-CN') ||
-      v.lang.startsWith('zh-Hans') ||
-      v.lang === 'zh'
-    );
-    if (zhVoice) {
-      this._voice = zhVoice;
-      console.log(`${LOG_PREFIX} [TTS] Fallback voice: ${zhVoice.name} (${zhVoice.lang})`);
-      return;
+    // 'auto' mode: find best available Chinese neural voice
+    const prefs = [
+      'Microsoft Xiaoxiao', 'Microsoft Yunxi', 'Microsoft Xiaoyi',
+      'Microsoft Yunyang', 'Microsoft Xiaobei', 'Microsoft Huihui',
+    ];
+    for (const p of prefs) {
+      const m = voices.find(v => v.name.includes(p));
+      if (m) { this._voice = m; console.log(`${LOG_PREFIX} [TTS] Voice: ${m.name}`); return; }
     }
-
-    // Last resort: default voice
-    console.warn(`${LOG_PREFIX} [TTS] No Chinese voice found, using default`);
+    const zh = voices.find(v => v.lang.startsWith('zh'));
+    if (zh) { this._voice = zh; return; }
+    console.warn(`${LOG_PREFIX} [TTS] No Chinese voice found`);
   }
 
   /**

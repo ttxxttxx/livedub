@@ -206,6 +206,31 @@
   transform: scale(1.2);
 }
 
+/* --- Select --- */
+.ld-select {
+  width: 100%;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: var(--ld-text);
+  font-size: 12px;
+  font-family: var(--ld-font);
+  cursor: pointer;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.ld-select:focus {
+  border-color: var(--ld-accent);
+}
+
+.ld-select option {
+  background: var(--ld-bg);
+  color: var(--ld-text);
+}
+
 /* --- Language Row --- */
 .ld-lang-row {
   display: flex;

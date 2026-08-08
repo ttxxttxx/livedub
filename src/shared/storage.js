@@ -48,6 +48,7 @@ export async function loadAllSettings() {
     [STORAGE_KEYS.ENABLED]: false,
     [STORAGE_KEYS.FROM_LANG]: 'en',
     [STORAGE_KEYS.TO_LANG]: 'zh-Hans',
+    [STORAGE_KEYS.VOICE]: 'auto',
   };
 
   const keys = Object.keys(defaults);

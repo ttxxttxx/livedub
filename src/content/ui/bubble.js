@@ -2,7 +2,7 @@
 // Injects a floating control panel into the YouTube page.
 // Controls: toggle switch, TTS volume slider, mix ratio slider, language display.
 
-import { UI, STORAGE_KEYS, LOG_PREFIX } from '../../shared/constants.js';
+import { UI, STORAGE_KEYS, TTS as TTS_CONF, LOG_PREFIX } from '../../shared/constants.js';
 import { getStored, setStored, loadAllSettings } from '../../shared/storage.js';
 
 export class BubbleUI {
@@ -12,10 +12,11 @@ export class BubbleUI {
    * @param {Function} options.onTtsVolumeChange — (volume: number)
    * @param {Function} options.onMixRatioChange — (ratio: number)
    */
-  constructor({ onToggle, onTtsVolumeChange, onMixRatioChange } = {}) {
+  constructor({ onToggle, onTtsVolumeChange, onMixRatioChange, onVoiceChange } = {}) {
     this._onToggle = onToggle || (() => {});
     this._onTtsVolumeChange = onTtsVolumeChange || (() => {});
     this._onMixRatioChange = onMixRatioChange || (() => {});
+    this._onVoiceChange = onVoiceChange || (() => {});
 
     this._enabled = false;
     this._ttsVolume = 1.0;
@@ -112,6 +113,12 @@ export class BubbleUI {
                    data-ld-slider="mix-ratio" />
           </div>
 
+          <!-- Voice Selector -->
+          <div class="ld-slider-group">
+            <div class="ld-slider-label"><span>🎤 音色</span></div>
+            <select class="ld-select" data-ld-action="voice"></select>
+          </div>
+
           <!-- Language -->
           <div class="ld-lang-row">
             <span class="ld-lang-badge">🇺🇸 EN</span>
@@ -137,9 +144,28 @@ export class BubbleUI {
     this._statusDot = root.querySelector('[data-ld-status-dot]');
     this._statusText = root.querySelector('[data-ld-status-text]');
 
+    // Populate voice selector
+    this._populateVoiceSelector();
+
     // Start auto-fade timer
     this._resetFadeTimer();
   }
+
+  _populateVoiceSelector() {
+    const sel = this._root.querySelector('[data-ld-action="voice"]');
+    if (!sel) return;
+    TTS_CONF.VOICES.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.id;
+      opt.textContent = v.name;
+      sel.appendChild(opt);
+    });
+    // Set saved or default
+    const savedVoice = this._voiceId || TTS_CONF.DEFAULT_VOICE;
+    sel.value = savedVoice;
+  }
+
+  setVoiceId(id) { this._voiceId = id; }
 
   // --- Events ---
 
@@ -193,6 +219,15 @@ export class BubbleUI {
       this._onMixRatioChange(this._mixRatio);
       setStored(STORAGE_KEYS.MIX_RATIO, this._mixRatio);
     });
+
+    // Voice selector
+    const voiceSel = this._root.querySelector('[data-ld-action="voice"]');
+    if (voiceSel) {
+      voiceSel.addEventListener('change', () => {
+        this._onVoiceChange(voiceSel.value);
+        setStored('livedub_voice', voiceSel.value);
+      });
+    }
 
     // Drag — save bound references for cleanup
     this._dragHandler = this._onDragMove.bind(this);

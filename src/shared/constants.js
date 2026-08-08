@@ -36,14 +36,21 @@ export const SILENCE = {
 
 export const TTS = {
   DEFAULT_LANG: 'zh-CN',
-  DEFAULT_RATE: 1.5,  // Slightly faster speech for reduced latency
+  DEFAULT_RATE: 1.5,
   DEFAULT_PITCH: 1.0,
   DEFAULT_VOLUME: 1.0,
-  // Voice preference — Edge has these high-quality Chinese voices
-  PREFERRED_VOICES: [
-    'Microsoft Xiaoxiao',
-    'Microsoft Yunxi',
-    'Microsoft Xiaoyi',
+  DEFAULT_VOICE: 'auto', // 'auto' = best available
+  // Edge neural Chinese voices — ordered by naturalness
+  VOICES: [
+    { id: 'auto', name: '自动（最佳可用）', gender: 'auto' },
+    { id: 'Microsoft Xiaoxiao', name: '晓晓 (女·活泼)', gender: 'female' },
+    { id: 'Microsoft Yunxi', name: '云希 (男·自然)', gender: 'male' },
+    { id: 'Microsoft Xiaoyi', name: '晓伊 (女·温柔)', gender: 'female' },
+    { id: 'Microsoft Yunyang', name: '云扬 (男·新闻)', gender: 'male' },
+    { id: 'Microsoft Xiaobei', name: '晓北 (女·东北)', gender: 'female' },
+    { id: 'Microsoft Xihan', name: '希涵 (女·粤语)', gender: 'female' },
+    { id: 'Microsoft Yunhao', name: '云浩 (男·沉稳)', gender: 'male' },
+    { id: 'Microsoft Huihui', name: '慧慧 (女·默认)', gender: 'female' },
   ],
 };
 
@@ -71,6 +78,7 @@ export const STORAGE_KEYS = {
   ENABLED: 'livedub_enabled',
   FROM_LANG: 'livedub_from_lang',
   TO_LANG: 'livedub_to_lang',
+  VOICE: 'livedub_voice',
 };
 
 export const LOG_PREFIX = '[LiveDub]';

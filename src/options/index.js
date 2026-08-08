@@ -7,6 +7,7 @@ import { loadAllSettings, saveSettings } from '../shared/storage.js';
 // ─── DOM Elements ──────────────────────────────────────────────────
 const apiKeyInput = document.getElementById('apiKey');
 const regionSelect = document.getElementById('region');
+const ttsVoiceSelect = document.getElementById('ttsVoice');
 const ttsVolumeSlider = document.getElementById('ttsVolume');
 const ttsRateSlider = document.getElementById('ttsRate');
 const mixRatioSlider = document.getElementById('mixRatio');
@@ -29,6 +30,11 @@ async function loadAndDisplay() {
   }
   if (settings[STORAGE_KEYS.REGION]) {
     regionSelect.value = settings[STORAGE_KEYS.REGION];
+  }
+
+  // Voice
+  if (settings[STORAGE_KEYS.VOICE]) {
+    ttsVoiceSelect.value = settings[STORAGE_KEYS.VOICE];
   }
 
   // TTS settings
@@ -69,6 +75,7 @@ saveBtn.addEventListener('click', async () => {
   const settings = {
     [STORAGE_KEYS.API_KEY]: apiKeyInput.value.trim(),
     [STORAGE_KEYS.REGION]: regionSelect.value,
+    [STORAGE_KEYS.VOICE]: ttsVoiceSelect.value,
     [STORAGE_KEYS.TTS_VOLUME]: parseInt(ttsVolumeSlider.value) / 100,
     [STORAGE_KEYS.TTS_RATE]: parseInt(ttsRateSlider.value) / 100,
     [STORAGE_KEYS.MIX_RATIO]: parseInt(mixRatioSlider.value) / 100,

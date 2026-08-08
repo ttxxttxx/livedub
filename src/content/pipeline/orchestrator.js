@@ -40,6 +40,7 @@ export class PipelineOrchestrator {
     this.tts = new TtsEngine({
       volume: config.ttsVolume,
       rate: config.ttsRate,
+      voiceId: config.voiceId || 'auto',
     });
 
     // Caption data

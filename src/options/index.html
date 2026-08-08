@@ -50,6 +50,19 @@
         <h2>🔊 语音合成 (TTS)</h2>
 
         <div class="form-group">
+          <label for="ttsVoice">音色</label>
+          <select id="ttsVoice">
+            <option value="auto">自动（最佳可用）</option>
+            <option value="Microsoft Xiaoxiao">晓晓 (女·活泼)</option>
+            <option value="Microsoft Yunxi">云希 (男·自然)</option>
+            <option value="Microsoft Xiaoyi">晓伊 (女·温柔)</option>
+            <option value="Microsoft Yunyang">云扬 (男·新闻)</option>
+            <option value="Microsoft Xiaobei">晓北 (女·东北)</option>
+            <option value="Microsoft Huihui">慧慧 (女·默认)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
           <label for="ttsVolume">默认音量</label>
           <div class="range-row">
             <input type="range" id="ttsVolume" min="0" max="100" value="100" />

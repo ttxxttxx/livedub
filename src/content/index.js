@@ -58,6 +58,7 @@ async function init() {
     onToggle: handleToggle,
     onTtsVolumeChange: handleTtsVolumeChange,
     onMixRatioChange: handleMixRatioChange,
+    onVoiceChange: handleVoiceChange,
   });
   await bubble.init();
   console.log(`${LOG_PREFIX} Bubble UI initialized`);
@@ -187,6 +188,14 @@ function handleMixRatioChange(ratio) {
   if (mixer) mixer.setMixRatio(ratio);
 }
 
+function handleVoiceChange(voiceId) {
+  if (pipeline && pipeline.tts) {
+    pipeline.tts.setVoice(voiceId);
+    console.log(`${LOG_PREFIX} Voice changed to: ${voiceId}`);
+  }
+  setStored('livedub_voice', voiceId);
+}
+
 // ─── Pipeline Control ──────────────────────────────────────────────
 
 async function startPipeline() {
@@ -204,6 +213,7 @@ async function startPipeline() {
       fromLang: settings?.livedub_from_lang || 'en',
       toLang: settings?.livedub_to_lang || 'zh-Hans',
       ttsVolume: bubble.getTtsVolume(),
+      voiceId: settings?.livedub_voice || 'auto',
     },
   });
 
