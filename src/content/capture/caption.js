@@ -118,25 +118,60 @@ export function startDOMCaptionObserver(video, onText) {
     let lastRaw = '';
     let count = 0;
 
+    let changeN = 0; // Count every caption change
     const timer = setInterval(() => {
       const raw = getVisibleCaptionText();
       const t = video.currentTime;
       if (video.paused || t < 0.1) return;
 
-      if (!raw) { lastRaw = ''; return; }
+      if (!raw) {
+        // Captions disappeared → flush any pending fragment
+        if (lastRaw && !extractSentences(lastRaw) && lastRaw.length > 15) {
+          const ft = lastRaw.trim();
+          if (!spokenSet.has(ft)) {
+            spokenSet.add(ft);
+            console.log(`${LOG_PREFIX} [DOM] ➤ flush(empty): "${ft.substring(0, 60)}"`);
+            onText({ text: ft, start: t - 2, duration: 2 });
+          }
+        }
+        lastRaw = ''; return;
+      }
       if (raw === lastRaw) return;
-      lastRaw = raw;
 
+      // Detect caption RESET: new text doesn't extend old text
+      if (lastRaw && !raw.startsWith(lastRaw)) {
+        // Old text is being replaced — flush any unspoken fragment
+        const oldSentences = extractSentences(lastRaw);
+        if (!oldSentences && lastRaw.length > 15) {
+          const ft = lastRaw.trim();
+          if (!spokenSet.has(ft)) {
+            spokenSet.add(ft);
+            console.log(`${LOG_PREFIX} [DOM] ➤ flush(reset): "${ft.substring(0, 60)}"`);
+            onText({ text: ft, start: t - 2, duration: 2 });
+          }
+        }
+      }
+
+      // Log EVERY caption change — compact format
+      changeN++;
+      lastRaw = raw;
       const sentences = extractSentences(raw);
-      if (!sentences) return; // Wait for complete sentences only
+      const tag = sentences ? `+${sentences.length}s` : '…'; // +Ns = N sentences, … = no punct
+      console.log(`${LOG_PREFIX} [CC#${changeN} ${tag}] "${raw.substring(0, 100)}"`);
 
       // Send ALL new complete sentences as one combined block
       // for better translation context (whole sentences, not fragments)
       const newSentences = [];
       for (const s of sentences) {
-        if (spokenSet.has(s)) continue;
+        if (spokenSet.has(s)) {
+          console.log(`${LOG_PREFIX} [DOM] ⊘ skip(dup): "${s.substring(0, 60)}"`);
+          continue;
+        }
         const recent = Array.from(spokenSet).slice(-20);
-        if (recent.some(sp => sp.includes(s))) continue;
+        if (recent.some(sp => sp.includes(s))) {
+          console.log(`${LOG_PREFIX} [DOM] ⊘ skip(sub): "${s.substring(0, 60)}"`);
+          continue;
+        }
         spokenSet.add(s);
         newSentences.push(s);
       }
