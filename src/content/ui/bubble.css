@@ -1,0 +1,260 @@
+/* LiveDub — Floating Bubble UI Styles
+   All selectors are namespaced with #livedub-bubble-root to avoid conflicts
+   with YouTube's own styles. */
+
+#livedub-bubble-root {
+  /* Reset — all styles scoped inside this root */
+  --ld-bg: rgba(15, 15, 20, 0.92);
+  --ld-bg-hover: rgba(20, 20, 30, 0.96);
+  --ld-accent: #7C3AED;
+  --ld-accent-glow: rgba(124, 58, 237, 0.4);
+  --ld-text: #e8e8ed;
+  --ld-text-dim: #9a9aad;
+  --ld-border: rgba(255, 255, 255, 0.08);
+  --ld-radius: 14px;
+  --ld-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 99999;
+  width: 260px;
+  font-family: var(--ld-font);
+  font-size: 13px;
+  color: var(--ld-text);
+  line-height: 1.4;
+  user-select: none;
+  -webkit-user-select: none;
+
+  /* Smooth fade for auto-hide */
+  transition: opacity 0.4s ease;
+}
+
+#livedub-bubble-root.ld-faded {
+  opacity: 0.35;
+}
+
+#livedub-bubble-root.ld-faded:hover {
+  opacity: 1;
+}
+
+/* --- Panel --- */
+.ld-panel {
+  background: var(--ld-bg);
+  border: 1px solid var(--ld-border);
+  border-radius: var(--ld-radius);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  overflow: hidden;
+  transition: background 0.3s;
+}
+
+.ld-panel:hover {
+  background: var(--ld-bg-hover);
+}
+
+/* --- Header / Drag Handle --- */
+.ld-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: move;
+  border-bottom: 1px solid var(--ld-border);
+}
+
+.ld-header:active {
+  cursor: grabbing;
+}
+
+.ld-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+}
+
+.ld-logo-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #4F46E5, #7C3AED);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.ld-close {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ld-text-dim);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.ld-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--ld-text);
+}
+
+/* --- Body --- */
+.ld-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* --- Toggle Switch --- */
+.ld-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ld-toggle-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.ld-toggle {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 13px;
+  cursor: pointer;
+  transition: background 0.25s;
+  border: none;
+  outline: none;
+  padding: 0;
+}
+
+.ld-toggle.active {
+  background: var(--ld-accent);
+  box-shadow: 0 0 12px var(--ld-accent-glow);
+}
+
+.ld-toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.ld-toggle.active .ld-toggle-knob {
+  transform: translateX(22px);
+}
+
+/* --- Sliders --- */
+.ld-slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ld-slider-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ld-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ld-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.ld-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ld-accent);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--ld-accent-glow);
+  transition: transform 0.15s;
+}
+
+.ld-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* --- Language Row --- */
+.ld-lang-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ld-text-dim);
+}
+
+.ld-lang-badge {
+  padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 20px;
+  font-weight: 600;
+  color: var(--ld-text);
+  letter-spacing: 0.3px;
+}
+
+.ld-lang-arrow {
+  color: var(--ld-accent);
+  font-size: 14px;
+}
+
+/* --- Status Bar --- */
+.ld-status {
+  padding: 8px 14px;
+  border-top: 1px solid var(--ld-border);
+  font-size: 10px;
+  color: var(--ld-text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ld-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #666;
+  flex-shrink: 0;
+}
+
+.ld-status-dot.active {
+  background: #22C55E;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.ld-status-dot.error {
+  background: #EF4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+}

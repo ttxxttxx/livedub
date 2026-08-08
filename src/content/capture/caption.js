@@ -1,0 +1,254 @@
+// LiveDub — YouTube Caption Extractor
+// Sentence-based DOM extraction: reads YouTube's .caption-window,
+// extracts complete sentences, speaks each one exactly once.
+
+import { YOUTUBE, LOG_PREFIX } from '../../shared/constants.js';
+
+function getVideoId() {
+  const m = window.location.href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function getVisibleCaptionText() {
+  // Try .caption-window first
+  const wins = document.querySelectorAll('.caption-window');
+  let bestText = '';
+  for (let i = wins.length - 1; i >= 0; i--) {
+    const s = window.getComputedStyle(wins[i]);
+    if (s.display !== 'none' && s.visibility !== 'hidden') {
+      const t = cleanCaptionText(wins[i]);
+      if (t && t.length > bestText.length) bestText = t;
+    }
+  }
+  if (bestText) return bestText;
+
+  // Fallback: .ytp-caption-segment
+  const segs = document.querySelectorAll('.ytp-caption-segment');
+  const parts = [];
+  for (const el of segs) {
+    const s = window.getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') continue;
+    if (parseFloat(s.opacity) < 0.5) continue;
+    const t = cleanCaptionText(el);
+    if (t) parts.push(t);
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Extract text from a caption element, removing duplicated words.
+ * YouTube sometimes renders words twice in overlapping caption elements.
+ */
+function cleanCaptionText(el) {
+  let text = el.textContent || '';
+  // Remove HTML tags
+  text = text.replace(/<[^>]+>/g, '');
+  // Collapse whitespace
+  text = text.replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+
+  // Dedup repeated words: "wordword" or "word word"
+  const words = text.split(' ');
+  const deduped = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (!w) continue;
+    // Check if this is a duplicated word (e.g., "nationalnational" → "national")
+    const half = Math.floor(w.length / 2);
+    if (w.length >= 4 && w.substring(0, half) === w.substring(half)) {
+      deduped.push(w.substring(0, half));
+      continue;
+    }
+    // Check if same as previous word
+    if (deduped.length > 0 && deduped[deduped.length - 1].toLowerCase() === w.toLowerCase()) {
+      continue;
+    }
+    deduped.push(w);
+  }
+  return deduped.join(' ');
+}
+
+function enableYouTubeCaptions() {
+  try {
+    let btn = document.querySelector('.ytp-subtitles-button');
+    if (!btn) {
+      const p = document.querySelector('#movie_player');
+      if (p?.shadowRoot) btn = p.shadowRoot.querySelector('.ytp-subtitles-button');
+    }
+    if (btn && btn.getAttribute('aria-pressed') !== 'true') {
+      btn.click();
+      console.log(`${LOG_PREFIX} [DOM] CC enabled`);
+    }
+  } catch(e) {}
+}
+
+/**
+ * Extract all complete sentences from caption text.
+ * A sentence is text ending with . ! or ?
+ * Returns array of sentences in order, or null if no complete sentences found.
+ */
+function extractSentences(text) {
+  if (!text) return null;
+  // Split on sentence boundaries, keeping the delimiter
+  const parts = text.match(/[^.!?]*[.!?]/g);
+  if (!parts || parts.length === 0) return null;
+  return parts.map(s => s.trim()).filter(s => s.length > 1);
+}
+
+// ─── DOM Caption Observer (sentence-based) ──────────────────────
+
+export function startDOMCaptionObserver(video, onText) {
+  try {
+    enableYouTubeCaptions();
+    if (!document.querySelector('#movie_player')) {
+      console.warn(`${LOG_PREFIX} [DOM] No #movie_player`);
+      return null;
+    }
+
+    const spokenSet = new Set(); // All sentences already spoken (dedup)
+    let lastRaw = '';
+    let silenceAt = 0;
+    let count = 0;
+
+    const timer = setInterval(() => {
+      const raw = getVisibleCaptionText();
+      const t = video.currentTime;
+      if (video.paused || t < 0.1) return;
+
+      if (!raw) {
+        silenceAt = silenceAt || t;
+        lastRaw = lastRaw || raw;
+        return; // Don't flush on silence in sentence mode
+      }
+
+      silenceAt = 0;
+      if (raw === lastRaw) return;
+      lastRaw = raw;
+
+      const sentences = extractSentences(raw);
+      if (!sentences) return;
+
+      for (const s of sentences) {
+        // Already spoken or is substring of a spoken sentence → skip
+        if (spokenSet.has(s)) continue;
+        const isSubstring = Array.from(spokenSet).some(spoken => spoken.includes(s));
+        if (isSubstring) continue;
+
+        spokenSet.add(s);
+        count++;
+        if (count <= 5 || count % 10 === 0) {
+          console.log(`${LOG_PREFIX} [DOM] #${count} "${s.substring(0, 60)}"`);
+        }
+        onText({ text: s, start: t, duration: 1 });
+      }
+    }, 150);
+
+    console.log(`${LOG_PREFIX} [DOM] Sentence observer started`);
+    return { stop: () => clearInterval(timer) };
+  } catch (e) {
+    console.warn(`${LOG_PREFIX} [DOM] Failed:`, e);
+    return null;
+  }
+}
+
+// ─── API-based extraction (strategies 2 & 3) ────────────────────
+
+function getCaptionTracksFromPlayerResponse() {
+  try {
+    const d = window.ytInitialPlayerResponse;
+    if (!d?.captions) return null;
+    const t = d.captions.playerCaptionsTracklistRenderer?.captionTracks;
+    return t?.length ? t : null;
+  } catch { return null; }
+}
+
+function selectEnglishTrack(tracks) {
+  if (!tracks?.length) return null;
+  const en = tracks.filter(t => t.languageCode === 'en' || t.languageCode?.startsWith('en'));
+  if (!en.length) return null;
+  return en.find(t => !t.kind || t.kind !== 'asr') || en[0];
+}
+
+function parseJSON3(data) {
+  const segs = [];
+  for (const ev of (data.events || [])) {
+    if (!ev.segs) continue;
+    const t = ev.segs.map(s => s.utf8 || '').join('').replace(/<[^>]+>/g, '').trim();
+    if (t) segs.push({ text: t, start: ev.tStartMs / 1000, duration: ev.dDurationMs / 1000 });
+  }
+  return segs;
+}
+
+function parseXML(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  if (doc.querySelector('parsererror')) return [];
+  const segs = [];
+  for (const el of doc.querySelectorAll('text')) {
+    const t = el.textContent?.replace(/<[^>]+>/g, '').trim();
+    if (t) segs.push({ text: t, start: +el.getAttribute('start') || 0, duration: +el.getAttribute('dur') || 0 });
+  }
+  return segs;
+}
+
+async function fetchTimedText(url) {
+  const r = await fetch(url + (url.includes('?') ? '&' : '?') + 'fmt=json3');
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const t = await r.text();
+  return t.trim().startsWith('{') ? parseJSON3(JSON.parse(t)) : parseXML(t);
+}
+
+async function fetchCaptionsDirectly(videoId) {
+  for (const lang of ['en', 'en-US', 'en-GB']) {
+    for (const fmt of ['&fmt=json3', '']) {
+      try {
+        const url = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}${fmt}`;
+        const r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) continue;
+        const t = await r.text();
+        if (!t || t.length < 20 || /^\s*<!DOCTYPE|<html/i.test(t)) continue;
+        const segs = t.trim().startsWith('{') ? parseJSON3(JSON.parse(t)) : parseXML(t);
+        if (segs?.length) { console.log(`${LOG_PREFIX} API: ${segs.length}`); return segs; }
+      } catch(e) {}
+    }
+  }
+  return null;
+}
+
+export async function extractCaptions() {
+  const vid = getVideoId();
+  if (!vid) return null;
+  const tracks = getCaptionTracksFromPlayerResponse();
+  if (tracks) {
+    const en = selectEnglishTrack(tracks);
+    if (en) {
+      try { const s = await fetchTimedText(en.baseUrl); if (s?.length) return s; } catch(e) {}
+    }
+  }
+  const s = await fetchCaptionsDirectly(vid);
+  if (s?.length) return s;
+  return null;
+}
+
+export function segmentsToPhrases(segments) {
+  if (!segments?.length) return [];
+  const gap = YOUTUBE.PHRASE_BOUNDARY_GAP_MS / 1000;
+  const phrases = [];
+  let cur = { text: segments[0].text, start: segments[0].start, end: segments[0].start + segments[0].duration };
+  for (let i = 1; i < segments.length; i++) {
+    const s = segments[i], e = s.start + s.duration;
+    if (s.start - cur.end >= gap) {
+      if (cur.text.trim()) phrases.push({ ...cur });
+      cur = { text: s.text, start: s.start, end: e };
+    } else { cur.text += ' ' + s.text; cur.end = e; }
+  }
+  if (cur.text.trim()) phrases.push(cur);
+  return phrases;
+}
+
+export function waitForPlayerResponse() {
+  return new Promise(resolve => {
+    if (window.ytInitialPlayerResponse) { resolve(); return; }
+    const i = setInterval(() => { if (window.ytInitialPlayerResponse) { clearInterval(i); resolve(); } }, 200);
+    setTimeout(() => { clearInterval(i); resolve(); }, 5000);
+  });
+}

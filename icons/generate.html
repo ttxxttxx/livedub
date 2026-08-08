@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LiveDub Icon Generator</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      text-align: center;
+      background: #0f0f14;
+      color: #e8e8ed;
+    }
+    h1 { margin-bottom: 8px; }
+    p { color: #9a9aad; margin-bottom: 24px; }
+    .icons {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      margin-bottom: 30px;
+    }
+    .icon-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    canvas {
+      border: 1px dashed rgba(255,255,255,0.15);
+      border-radius: 12px;
+    }
+    button {
+      padding: 8px 20px;
+      background: #7C3AED;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { background: #6D28D9; }
+    .done { color: #22C55E; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>🎙 LiveDub Icon Generator</h1>
+  <p>Click each button to download the PNG icon. Save them to the <code>icons/</code> folder.</p>
+
+  <div class="icons">
+    <div class="icon-group">
+      <canvas id="c16" width="16" height="16"></canvas>
+      <button onclick="download(16,'icon-16.png')">Download 16×16</button>
+    </div>
+    <div class="icon-group">
+      <canvas id="c48" width="48" height="48"></canvas>
+      <button onclick="download(48,'icon-48.png')">Download 48×48</button>
+    </div>
+    <div class="icon-group">
+      <canvas id="c128" width="128" height="128"></canvas>
+      <button onclick="download(128,'icon-128.png')">Download 128×128</button>
+    </div>
+  </div>
+
+  <p class="done" id="status"></p>
+
+  <script>
+    function drawIcon(canvasId, size) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      const r = Math.round(size * 0.18);
+
+      // Background gradient
+      const grad = ctx.createLinearGradient(0, 0, size, size);
+      grad.addColorStop(0, '#4F46E5');
+      grad.addColorStop(1, '#7C3AED');
+
+      // Rounded rect
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(size - r, 0);
+      ctx.quadraticCurveTo(size, 0, size, r);
+      ctx.lineTo(size, size - r);
+      ctx.quadraticCurveTo(size, size, size - r, size);
+      ctx.lineTo(r, size);
+      ctx.quadraticCurveTo(0, size, 0, size - r);
+      ctx.lineTo(0, r);
+      ctx.quadraticCurveTo(0, 0, r, 0);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Sound wave bars
+      ctx.strokeStyle = 'white';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = Math.max(1, size * 0.04);
+      ctx.globalAlpha = 0.9;
+
+      const cx = size * 0.38;
+      const cy = size * 0.5;
+
+      // Bar 1 (left)
+      const bh1 = size * 0.28;
+      ctx.beginPath();
+      ctx.moveTo(cx - size * 0.14, cy - bh1/2);
+      ctx.quadraticCurveTo(cx - size * 0.12, cy - bh1/2 - size * 0.02, cx - size * 0.06, cy - bh1/2);
+      ctx.lineTo(cx - size * 0.06, cy + bh1/2);
+      ctx.quadraticCurveTo(cx - size * 0.12, cy + bh1/2 + size * 0.02, cx - size * 0.14, cy + bh1/2);
+      ctx.stroke();
+
+      // Bar 2 (middle)
+      const bh2 = size * 0.42;
+      ctx.beginPath();
+      ctx.moveTo(cx - size * 0.02, cy - bh2/2);
+      ctx.quadraticCurveTo(cx, cy - bh2/2 - size * 0.03, cx + size * 0.06, cy - bh2/2);
+      ctx.lineTo(cx + size * 0.06, cy + bh2/2);
+      ctx.quadraticCurveTo(cx, cy + bh2/2 + size * 0.03, cx - size * 0.02, cy + bh2/2);
+      ctx.stroke();
+
+      // Bar 3 (right)
+      const bh3 = size * 0.54;
+      ctx.beginPath();
+      ctx.moveTo(cx + size * 0.1, cy - bh3/2);
+      ctx.quadraticCurveTo(cx + size * 0.12, cy - bh3/2 - size * 0.04, cx + size * 0.18, cy - bh3/2);
+      ctx.lineTo(cx + size * 0.18, cy + bh3/2);
+      ctx.quadraticCurveTo(cx + size * 0.12, cy + bh3/2 + size * 0.04, cx + size * 0.1, cy + bh3/2);
+      ctx.stroke();
+
+      ctx.globalAlpha = 1;
+
+      // "A" letter
+      ctx.fillStyle = 'white';
+      ctx.globalAlpha = 0.9;
+      ctx.font = `bold ${size * 0.22}px Arial, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', size * 0.34, size * 0.62);
+      ctx.globalAlpha = 1;
+    }
+
+    function download(size, filename) {
+      const canvas = document.getElementById('c' + size);
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      document.getElementById('status').textContent = `✅ Downloaded ${filename}`;
+    }
+
+    // Draw all icons
+    drawIcon('c16', 16);
+    drawIcon('c48', 48);
+    drawIcon('c128', 128);
+  </script>
+</body>
+</html>

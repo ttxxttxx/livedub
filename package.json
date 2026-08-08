@@ -1,0 +1,15 @@
+{
+  "name": "livedub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Real-time voice translation browser extension",
+  "scripts": {
+    "build": "node build.js",
+    "pretest": "node build.js",
+    "test": "node tests/run.js",
+    "watch": "node build.js --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

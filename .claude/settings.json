@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip list *)",
+      "Bash(npm install *)",
+      "Bash(node build.js)",
+      "Bash(node -e ' *)",
+      "WebFetch(domain:developers.google.com)"
+    ]
+  }
+}
