@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m 'fix: stability improvements — 3 rounds of bug fixes *)"
+    ]
+  }
+}

@@ -114,9 +114,8 @@ export function startDOMCaptionObserver(video, onText) {
     }
 
     const spokenSet = new Set();
-    const MAX_SPOKEN = 50; // Limit set size for long videos
+    const MAX_SPOKEN = 50;
     let lastRaw = '';
-    let firstRawTime = 0;  // When current text block started
     let count = 0;
 
     const timer = setInterval(() => {
@@ -124,44 +123,32 @@ export function startDOMCaptionObserver(video, onText) {
       const t = video.currentTime;
       if (video.paused || t < 0.1) return;
 
-      if (!raw) { lastRaw = ''; firstRawTime = 0; return; }
+      if (!raw) { lastRaw = ''; return; }
       if (raw === lastRaw) return;
-
-      if (!lastRaw) firstRawTime = t;
       lastRaw = raw;
 
       const sentences = extractSentences(raw);
+      if (!sentences) return; // Wait for complete sentences only
 
-      // If raw text has been accumulating for >5s without any complete
-      // sentence, flush it as-is (handles captions without punctuation)
-      if (!sentences && t - firstRawTime > 5 && raw.length > 10) {
-        if (!spokenSet.has(raw)) {
-          spokenSet.add(raw);
-          count++;
-          console.log(`${LOG_PREFIX} [DOM] #${count} (no-punct) "${raw.substring(0, 60)}"`);
-          onText({ text: raw, start: firstRawTime, duration: t - firstRawTime });
-          if (spokenSet.size > MAX_SPOKEN) spokenSet.clear();
-        }
-        firstRawTime = t;
-        return;
-      }
-
-      if (!sentences) return;
-      firstRawTime = t; // Reset timer when we do have sentences
-
+      // Send ALL new complete sentences as one combined block
+      // for better translation context (whole sentences, not fragments)
+      const newSentences = [];
       for (const s of sentences) {
         if (spokenSet.has(s)) continue;
-        // Check substring only against recent items for perf
         const recent = Array.from(spokenSet).slice(-20);
         if (recent.some(sp => sp.includes(s))) continue;
-
         spokenSet.add(s);
-        if (spokenSet.size > MAX_SPOKEN) spokenSet.clear();
+        newSentences.push(s);
+      }
+      if (spokenSet.size > MAX_SPOKEN) spokenSet.clear();
+
+      if (newSentences.length > 0) {
         count++;
+        const combined = newSentences.join(' ');
         if (count <= 5 || count % 10 === 0) {
-          console.log(`${LOG_PREFIX} [DOM] #${count} "${s.substring(0, 60)}"`);
+          console.log(`${LOG_PREFIX} [DOM] #${count} "${combined.substring(0, 80)}"`);
         }
-        onText({ text: s, start: t, duration: 1 });
+        onText({ text: combined, start: t, duration: 1 });
       }
     }, 150);
 
