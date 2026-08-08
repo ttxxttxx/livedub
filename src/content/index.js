@@ -136,12 +136,18 @@ function getYouTubeVideoId() {
   return null;
 }
 
+let _navHandler = null;
+let _adObserver = null;
+
 // ─── SPA Navigation ─────────────────────────────────────────────────
 
 function watchForNavigation() {
   let lastVideoId = currentVideoId;
 
-  document.addEventListener('yt-navigate-finish', () => {
+  // Remove old handler to prevent duplicates
+  if (_navHandler) document.removeEventListener('yt-navigate-finish', _navHandler);
+
+  _navHandler = () => {
     const newVideoId = getYouTubeVideoId();
     if (newVideoId && newVideoId !== lastVideoId) {
       console.log(`${LOG_PREFIX} SPA navigation: ${lastVideoId} → ${newVideoId}`);
@@ -156,7 +162,9 @@ function watchForNavigation() {
         if (bubble && bubble._enabled) startPipeline();
       }
     }
-  });
+  };
+
+  document.addEventListener('yt-navigate-finish', _navHandler);
 }
 
 // ─── UI Event Handlers ─────────────────────────────────────────────
@@ -241,7 +249,8 @@ function stopPipeline() {
 // ─── Ad Detection ──────────────────────────────────────────────────
 
 function watchForAds() {
-  const observer = new MutationObserver(() => {
+  if (_adObserver) _adObserver.disconnect();
+  _adObserver = new MutationObserver(() => {
     const isAd = document.querySelector(YOUTUBE.AD_DETECTOR);
     if (isAd && pipeline) {
       console.log(`${LOG_PREFIX} Ad detected — pausing`);
@@ -250,7 +259,7 @@ function watchForAds() {
   });
   const playerContainer = document.querySelector(YOUTUBE.PLAYER_CONTAINER);
   if (playerContainer) {
-    observer.observe(playerContainer, { attributes: true, attributeFilter: ['class'], subtree: false });
+    _adObserver.observe(playerContainer, { attributes: true, attributeFilter: ['class'], subtree: false });
   }
 }
 
@@ -279,8 +288,11 @@ function boot() {
 boot();
 
 // Listen for YouTube SPA navigation (homepage → video, video → video)
-document.addEventListener('yt-navigate-finish', () => {
+let _bootNavHandler = null;
+if (_bootNavHandler) document.removeEventListener('yt-navigate-finish', _bootNavHandler);
+_bootNavHandler = () => {
   console.log('[LiveDub] Navigation detected:', window.location.href);
-  window.__livedub_initialized = false; // Allow re-init on new video
+  window.__livedub_initialized = false;
   boot();
-});
+};
+document.addEventListener('yt-navigate-finish', _bootNavHandler);

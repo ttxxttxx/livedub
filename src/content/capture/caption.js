@@ -41,28 +41,36 @@ function getVisibleCaptionText() {
  */
 function cleanCaptionText(el) {
   let text = el.textContent || '';
-  // Remove HTML tags
   text = text.replace(/<[^>]+>/g, '');
-  // Collapse whitespace
   text = text.replace(/\s+/g, ' ').trim();
   if (!text) return '';
 
-  // Dedup repeated words: "wordword" or "word word"
   const words = text.split(' ');
   const deduped = [];
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     if (!w) continue;
-    // Check if this is a duplicated word (e.g., "nationalnational" → "national")
-    const half = Math.floor(w.length / 2);
-    if (w.length >= 4 && w.substring(0, half) === w.substring(half)) {
-      deduped.push(w.substring(0, half));
+
+    // Case 1: concatenated duplicate "wordword" → "word"
+    // Only check words ≥ 6 chars (shorter words are rarely true duplicates)
+    let foundSplit = false;
+    if (w.length >= 6) {
+      for (let split = Math.floor(w.length / 3); split <= Math.floor(w.length * 2 / 3); split++) {
+        if (split >= 3 && w.substring(0, split) === w.substring(split, split * 2)) {
+          deduped.push(w.substring(0, split));
+          foundSplit = true;
+          break;
+        }
+      }
+    }
+    if (foundSplit) continue;
+
+    // Case 2: adjacent same word "word word" → "word"
+    if (deduped.length > 0 &&
+        deduped[deduped.length - 1].toLowerCase() === w.toLowerCase()) {
       continue;
     }
-    // Check if same as previous word
-    if (deduped.length > 0 && deduped[deduped.length - 1].toLowerCase() === w.toLowerCase()) {
-      continue;
-    }
+
     deduped.push(w);
   }
   return deduped.join(' ');
@@ -105,9 +113,10 @@ export function startDOMCaptionObserver(video, onText) {
       return null;
     }
 
-    const spokenSet = new Set(); // All sentences already spoken (dedup)
+    const spokenSet = new Set();
+    const MAX_SPOKEN = 50; // Limit set size for long videos
     let lastRaw = '';
-    let silenceAt = 0;
+    let firstRawTime = 0;  // When current text block started
     let count = 0;
 
     const timer = setInterval(() => {
@@ -115,26 +124,39 @@ export function startDOMCaptionObserver(video, onText) {
       const t = video.currentTime;
       if (video.paused || t < 0.1) return;
 
-      if (!raw) {
-        silenceAt = silenceAt || t;
-        lastRaw = lastRaw || raw;
-        return; // Don't flush on silence in sentence mode
-      }
-
-      silenceAt = 0;
+      if (!raw) { lastRaw = ''; firstRawTime = 0; return; }
       if (raw === lastRaw) return;
+
+      if (!lastRaw) firstRawTime = t;
       lastRaw = raw;
 
       const sentences = extractSentences(raw);
+
+      // If raw text has been accumulating for >5s without any complete
+      // sentence, flush it as-is (handles captions without punctuation)
+      if (!sentences && t - firstRawTime > 5 && raw.length > 10) {
+        if (!spokenSet.has(raw)) {
+          spokenSet.add(raw);
+          count++;
+          console.log(`${LOG_PREFIX} [DOM] #${count} (no-punct) "${raw.substring(0, 60)}"`);
+          onText({ text: raw, start: firstRawTime, duration: t - firstRawTime });
+          if (spokenSet.size > MAX_SPOKEN) spokenSet.clear();
+        }
+        firstRawTime = t;
+        return;
+      }
+
       if (!sentences) return;
+      firstRawTime = t; // Reset timer when we do have sentences
 
       for (const s of sentences) {
-        // Already spoken or is substring of a spoken sentence → skip
         if (spokenSet.has(s)) continue;
-        const isSubstring = Array.from(spokenSet).some(spoken => spoken.includes(s));
-        if (isSubstring) continue;
+        // Check substring only against recent items for perf
+        const recent = Array.from(spokenSet).slice(-20);
+        if (recent.some(sp => sp.includes(s))) continue;
 
         spokenSet.add(s);
+        if (spokenSet.size > MAX_SPOKEN) spokenSet.clear();
         count++;
         if (count <= 5 || count % 10 === 0) {
           console.log(`${LOG_PREFIX} [DOM] #${count} "${s.substring(0, 60)}"`);

@@ -52,6 +52,11 @@ export class BubbleUI {
    * Remove the bubble from the DOM.
    */
   destroy() {
+    if (this._fadeTimer) clearTimeout(this._fadeTimer);
+    if (this._dragHandler) {
+      document.removeEventListener('mousemove', this._dragHandler);
+      document.removeEventListener('mouseup', this._dragEndHandler);
+    }
     if (this._root && this._root.parentNode) {
       this._root.parentNode.removeChild(this._root);
     }
@@ -148,12 +153,25 @@ export class BubbleUI {
       setStored(STORAGE_KEYS.ENABLED, this._enabled);
     });
 
-    // Close button
+    // Minimize button (was "close")
     const closeBtn = this._root.querySelector('[data-ld-action="close"]');
+    let minimized = false;
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      this._root.style.display = 'none';
-      // Show a small "reopen" button — TODO: minimizable state
+      minimized = !minimized;
+      const body = this._root.querySelector('.ld-body');
+      const status = this._root.querySelector('.ld-status');
+      if (minimized) {
+        body.style.display = 'none';
+        status.style.display = 'none';
+        this._root.style.width = '48px';
+        closeBtn.textContent = '＋';
+      } else {
+        body.style.display = '';
+        status.style.display = '';
+        this._root.style.width = '';
+        closeBtn.textContent = '✕';
+      }
     });
 
     // TTS Volume slider
@@ -176,11 +194,13 @@ export class BubbleUI {
       setStored(STORAGE_KEYS.MIX_RATIO, this._mixRatio);
     });
 
-    // Drag
+    // Drag — save bound references for cleanup
+    this._dragHandler = this._onDragMove.bind(this);
+    this._dragEndHandler = this._onDragEnd.bind(this);
     const header = this._root.querySelector('[data-ld-drag-handle]');
     header.addEventListener('mousedown', this._onDragStart.bind(this));
-    document.addEventListener('mousemove', this._onDragMove.bind(this));
-    document.addEventListener('mouseup', this._onDragEnd.bind(this));
+    document.addEventListener('mousemove', this._dragHandler);
+    document.addEventListener('mouseup', this._dragEndHandler);
 
     // Auto-fade on inactivity
     this._root.addEventListener('mouseenter', () => {

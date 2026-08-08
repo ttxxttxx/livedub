@@ -76,8 +76,17 @@ export class AudioMixer {
 
   getMixRatio() { return this._mixRatio; }
 
-  mute() { this.setMixRatio(0); }
-  unmute() { this.setMixRatio(this._mixRatio); }
+  mute() {
+    if (this._savedRatio === undefined) {
+      this._savedRatio = this._mixRatio;
+    }
+    this.setMixRatio(0);
+  }
+  unmute() {
+    if (this._savedRatio !== undefined) {
+      this.setMixRatio(this._savedRatio);
+    }
+  }
 
   destroy() {
     if (!this._active) return;

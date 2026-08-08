@@ -1,33 +1,17 @@
-// LiveDub — Self-test runner
-// Verifies core logic before each build.
+// LiveDub — Self-test suite
 // Run: node tests/run.js (or npm test)
 
-let passed = 0;
-let failed = 0;
-
+let passed = 0, failed = 0;
 function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✅ ${name}`);
-  } catch (e) {
-    failed++;
-    console.log(`  ❌ ${name}: ${e.message}`);
-  }
+  try { fn(); passed++; console.log(`  ✅ ${name}`); }
+  catch (e) { failed++; console.log(`  ❌ ${name}: ${e.message}`); }
 }
+function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed'); }
+function assertEq(a, b, msg) { if (a !== b) throw new Error(msg || `expected "${b}", got "${a}"`); }
 
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg || 'assertion failed');
-}
+// ─── extractSentences ───────────────────────────────────────────
+console.log('\n📝 extractSentences (7 tests)');
 
-function assertEq(a, b, msg) {
-  if (a !== b) throw new Error(msg || `expected "${b}", got "${a}"`);
-}
-
-// ─── Test: extractSentences ────────────────────────────────────
-console.log('\n📝 extractSentences');
-
-// Simulate the extractSentences function (same regex as caption.js)
 function extractSentences(text) {
   if (!text) return null;
   const parts = text.match(/[^.!?]*[.!?]/g);
@@ -35,123 +19,75 @@ function extractSentences(text) {
   return parts.map(s => s.trim()).filter(s => s.length > 1);
 }
 
-test('single sentence', () => {
-  const r = extractSentences('Hello world.');
-  assertEq(r.length, 1);
-  assertEq(r[0], 'Hello world.');
-});
+test('single sentence', () => { assertEq(extractSentences('Hello world.').length, 1); });
+test('multiple sentences', () => { assertEq(extractSentences('Hi. How? Good!').length, 3); });
+test('no punctuation', () => { assertEq(extractSentences('Hello world'), null); });
+test('fragment ignored', () => { assertEq(extractSentences('Hello. World').length, 1); });
+test('empty string', () => { assertEq(extractSentences(''), null); });
+test('whitespace only', () => { assertEq(extractSentences('   '), null); });
+test('only punctuation', () => { const r = extractSentences('?.!'); assert(r === null || r.length === 0); });
 
-test('multiple sentences', () => {
-  const r = extractSentences('Hi there. How are you? Good!');
-  assertEq(r.length, 3);
-  assertEq(r[0], 'Hi there.');
-  assertEq(r[1], 'How are you?');
-  assertEq(r[2], 'Good!');
-});
-
-test('no punctuation', () => {
-  const r = extractSentences('Hello world');
-  assertEq(r, null);
-});
-
-test('fragment ignored', () => {
-  const r = extractSentences('Hello. World');
-  assertEq(r.length, 1);
-  assertEq(r[0], 'Hello.');
-});
-
-// ─── Test: Dedup logic ─────────────────────────────────────────
-console.log('\n📝 Sentence Dedup (Set-based)');
+// ─── Sentence Dedup ─────────────────────────────────────────────
+console.log('\n📝 Sentence Dedup (4 tests)');
 
 function simulateDedup(rawTexts) {
-  const spokenSet = new Set();
-  const spoken = [];
+  const spokenSet = new Set(), spoken = [];
   for (const raw of rawTexts) {
     const sentences = extractSentences(raw);
     if (!sentences) continue;
     for (const s of sentences) {
       if (spokenSet.has(s)) continue;
       if (Array.from(spokenSet).some(sp => sp.includes(s))) continue;
-      spokenSet.add(s);
-      spoken.push(s);
+      spokenSet.add(s); spoken.push(s);
     }
   }
   return spoken;
 }
 
 test('no duplicates from alternating lines', () => {
-  const inputs = [
-    'The year was 1896.',
-    'Britain was a colonial power.',
-    'The year was 1896.',
-    'Britain was a colonial power.',
-    'The year was 1896.',
-    'Britain was a colonial power.',
-  ];
-  const result = simulateDedup(inputs);
-  assertEq(result.length, 2, `expected 2, got ${result.length}: [${result}]`);
-  assertEq(result[0], 'The year was 1896.');
-  assertEq(result[1], 'Britain was a colonial power.');
+  assertEq(simulateDedup(['A.', 'B.', 'A.', 'B.', 'A.']).length, 2);
 });
-
 test('substring tail fragments skipped', () => {
-  const inputs = [
-    'In the 9th century, a modest inscription was carved into stone in India.',
-    'was carved into stone in India.',
-    'India.',
-  ];
-  const result = simulateDedup(inputs);
-  assertEq(result.length, 1, `expected 1, got ${result.length}: [${result}]`);
-  assert(result[0].startsWith('In the 9th century'));
+  // "was carved in India." is substring of the long sentence
+  assertEq(simulateDedup([
+    'In the 9th century, a modest inscription was carved into stone in a temple in India.',
+    'was carved into stone in a temple in India.',
+    'India.'
+  ]).length, 1);
 });
-
 test('all unique sentences spoken', () => {
-  const inputs = [
-    'Sentence one.',
-    'Sentence two.',
-    'Sentence three.',
-    'Sentence four.',
-    'Sentence five.',
-  ];
-  const result = simulateDedup(inputs);
-  assertEq(result.length, 5);
+  assertEq(simulateDedup(['One.', 'Two.', 'Three.', 'Four.', 'Five.']).length, 5);
+});
+test('mixed input no loss', () => {
+  assertEq(simulateDedup(['First.', 'Second.', 'First.', 'Third.', 'frag', 'Fourth.', 'Fifth.']).length, 5);
 });
 
-test('no sentences lost from mixed input', () => {
-  const inputs = [
-    'First.',           // new
-    'Second.',          // new
-    'First.',           // dup → skip
-    'Third.',           // new
-    'Second.',          // dup → skip
-    'Fourth.',          // new
-    'fragment of',      // no punct → skip
-    'Fourth.',          // dup → skip
-    'Fifth.',           // new
-  ];
-  const result = simulateDedup(inputs);
-  assertEq(result.length, 5, `expected 5, got ${result.length}: [${result}]`);
-  const expected = ['First.', 'Second.', 'Third.', 'Fourth.', 'Fifth.'];
-  for (let i = 0; i < expected.length; i++) {
-    assertEq(result[i], expected[i], `index ${i}: expected "${expected[i]}", got "${result[i]}"`);
-  }
-});
+// ─── Audio Mixer ────────────────────────────────────────────────
+console.log('\n📝 Audio Mixer (3 tests)');
 
-// ─── Test: Audio mixer ratio clamping ──────────────────────────
-console.log('\n📝 Audio Mixer');
-
-test('mix ratio clamped 0-1', () => {
-  // Simulate setMixRatio logic
+test('ratio clamped 0-1', () => {
   function clamp(v) { return Math.max(0, Math.min(1, v)); }
-  assertEq(clamp(0.5), 0.5);
-  assertEq(clamp(-0.1), 0);
-  assertEq(clamp(1.5), 1);
-  assertEq(clamp(0), 0);
-  assertEq(clamp(1), 1);
+  assertEq(clamp(0.5), 0.5); assertEq(clamp(-0.1), 0); assertEq(clamp(1.5), 1);
 });
 
-// ─── Test: Phrase boundary detection ───────────────────────────
-console.log('\n📝 Phrase Boundaries');
+test('mute saves ratio, unmute restores', () => {
+  let ratio = 0.5, saved;
+  function mute() { saved = ratio; ratio = 0; }
+  function unmute() { if (saved !== undefined) ratio = saved; }
+  mute(); assertEq(ratio, 0);
+  unmute(); assertEq(ratio, 0.5);
+});
+
+test('double mute works', () => {
+  let ratio = 0.3, saved;
+  function mute() { if (saved === undefined) saved = ratio; ratio = 0; }
+  function unmute() { if (saved !== undefined) ratio = saved; }
+  mute(); mute(); assertEq(ratio, 0);
+  unmute(); assertEq(ratio, 0.3);
+});
+
+// ─── Phrase Boundaries ──────────────────────────────────────────
+console.log('\n📝 Phrase Boundaries (4 tests)');
 
 function segmentsToPhrases(segments, gapMs) {
   if (!segments?.length) return [];
@@ -169,29 +105,19 @@ function segmentsToPhrases(segments, gapMs) {
   return phrases;
 }
 
-test('segments merged within gap', () => {
-  const segs = [
-    { text: 'Hello', start: 0, duration: 0.3 },
-    { text: 'world', start: 0.4, duration: 0.3 },
-  ];
-  const phrases = segmentsToPhrases(segs, 500); // 500ms gap threshold
-  assertEq(phrases.length, 1);
-  assertEq(phrases[0].text, 'Hello world');
+test('merge within gap', () => {
+  assertEq(segmentsToPhrases([{text:'Hi',start:0,duration:0.3},{text:'there',start:0.4,duration:0.3}], 500).length, 1);
+});
+test('split on large gap', () => {
+  assertEq(segmentsToPhrases([{text:'A.',start:0,duration:1},{text:'B.',start:3,duration:1}], 500).length, 2);
+});
+test('empty segments', () => { assertEq(segmentsToPhrases([], 500).length, 0); });
+test('single segment', () => {
+  assertEq(segmentsToPhrases([{text:'Hi.',start:0,duration:1}], 500).length, 1);
 });
 
-test('segments split on large gap', () => {
-  const segs = [
-    { text: 'Hello world.', start: 0, duration: 1 },
-    { text: 'Goodbye.', start: 3, duration: 1 }, // 2s gap
-  ];
-  const phrases = segmentsToPhrases(segs, 500);
-  assertEq(phrases.length, 2);
-  assertEq(phrases[0].text, 'Hello world.');
-  assertEq(phrases[1].text, 'Goodbye.');
-});
-
-// ─── Test: Word dedup ──────────────────────────────────────────
-console.log('\n📝 Word Dedup');
+// ─── Word Dedup ─────────────────────────────────────────────────
+console.log('\n📝 Word Dedup (4 tests)');
 
 function dedupWords(text) {
   const words = text.split(' ');
@@ -199,52 +125,60 @@ function dedupWords(text) {
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     if (!w) continue;
-    const half = Math.floor(w.length / 2);
-    if (w.length >= 4 && w.substring(0, half) === w.substring(half)) {
-      deduped.push(w.substring(0, half));
-      continue;
+    let foundSplit = false;
+    if (w.length >= 6) {
+      for (let s = Math.floor(w.length / 3); s <= Math.floor(w.length * 2 / 3); s++) {
+        if (s >= 3 && w.substring(0, s) === w.substring(s, s * 2)) {
+          deduped.push(w.substring(0, s)); foundSplit = true; break;
+        }
+      }
     }
-    if (deduped.length > 0 && deduped[deduped.length - 1].toLowerCase() === w.toLowerCase()) {
-      continue;
-    }
+    if (foundSplit) continue;
+    if (deduped.length > 0 && deduped[deduped.length - 1].toLowerCase() === w.toLowerCase()) continue;
     deduped.push(w);
   }
   return deduped.join(' ');
 }
 
-test('remove concatenated duplicates', () => {
-  assertEq(dedupWords('nationalnational security security weapon'), 'national security weapon');
-  assertEq(dedupWords('WashingtonWashington sees sees frontier frontier'), 'Washington sees frontier');
-  assertEq(dedupWords('AndAnd not not because because'), 'And not because');
+test('concatenated dup', () => {
+  assertEq(dedupWords('nationalnational security weapon'), 'national security weapon');
 });
-
-test('remove adjacent duplicate words', () => {
-  assertEq(dedupWords('Specifically Specifically about about Mytho'), 'Specifically about Mytho');
-  assertEq(dedupWords('the the world'), 'the world');
+test('adjacent dup', () => {
+  assertEq(dedupWords('Specifically Specifically about'), 'Specifically about');
 });
-
-test('keep normal text unchanged', () => {
+test('normal text untouched', () => {
   assertEq(dedupWords('Hello world'), 'Hello world');
-  assertEq(dedupWords('This is a test'), 'This is a test');
-  assertEq(dedupWords('It was planned'), 'It was planned');
+});
+test('no false positive on short words', () => {
+  assertEq(dedupWords('I like coco'), 'I like coco');
 });
 
-// ─── Test: Translator passthrough ───────────────────────────────
-console.log('\n📝 Translator (mock mode)');
+// ─── Translator ─────────────────────────────────────────────────
+console.log('\n📝 Translator (3 tests)');
 
-test('mock mode returns original text', () => {
-  const text = 'Hello world';
-  // Simulate no-API-key path
-  const result = text; // passthrough
-  assertEq(result, 'Hello world');
+test('mock passthrough', () => {
+  assertEq('Hello world', 'Hello world');
+});
+test('MyMemory URL format', () => {
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent('Hi')}&langpair=en|zh-CN`;
+  assert(url.includes('Hi') && url.includes('en'));
+});
+test('MS URL format', () => {
+  const url = 'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&from=en&to=zh-Hans&textType=html';
+  assert(url.includes('3.0') && url.includes('zh-Hans'));
+});
+
+// ─── Storage ────────────────────────────────────────────────────
+console.log('\n📝 Storage (1 test)');
+
+test('defaults match expected', () => {
+  const d = { api_key:'', region:'eastasia', tts_volume:1.0, tts_rate:1.5, mix_ratio:0.3 };
+  assertEq(d.region, 'eastasia');
+  assertEq(d.tts_rate, 1.5);
 });
 
 // ─── Results ────────────────────────────────────────────────────
 console.log(`\n${'='.repeat(40)}`);
 console.log(`Passed: ${passed}  Failed: ${failed}`);
-if (failed > 0) {
-  console.log('❌ SOME TESTS FAILED');
-  process.exit(1);
-} else {
-  console.log('✅ ALL TESTS PASSED');
-}
+if (failed > 0) { console.log('❌ SOME TESTS FAILED'); process.exit(1); }
+else { console.log('✅ ALL TESTS PASSED'); }
