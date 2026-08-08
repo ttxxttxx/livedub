@@ -154,15 +154,48 @@ export class BubbleUI {
   _populateVoiceSelector() {
     const sel = this._root.querySelector('[data-ld-action="voice"]');
     if (!sel) return;
-    TTS_CONF.VOICES.forEach(v => {
+
+    // Get ACTUAL available voices from the browser
+    const allVoices = speechSynthesis.getVoices();
+    const zhVoices = allVoices.filter(v => v.lang.startsWith('zh'));
+
+    if (zhVoices.length === 0) {
+      // No Chinese voices — use hardcoded list as fallback
+      TTS_CONF.VOICES.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.id; opt.textContent = v.name;
+        sel.appendChild(opt);
+      });
+    } else {
+      // Use real voices from the system
       const opt = document.createElement('option');
-      opt.value = v.id;
-      opt.textContent = v.name;
+      opt.value = 'auto'; opt.textContent = '自动（最佳可用）';
       sel.appendChild(opt);
-    });
+
+      // Known male voice markers in both Chinese and English Edge
+      const maleMarkers = ['云希','云扬','云健','云夏','云龙','云哲','雲龍','雲哲','Yunxi','Yunyang','Yunjian','Yunxia','Yunlong','Yunjhe','Kangkang','Hong'];
+      zhVoices.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.name;
+        // Clean label: remove "Microsoft " prefix, "(Natural)" suffix, and trailing region info
+        let label = v.name
+          .replace('Microsoft ', '')
+          .replace(/Online\s*/, '')
+          .replace(/\(Natural\)/g, '')
+          .replace(/\s*[-–]\s*Chinese\s*\([^)]*\).*$/, '')
+          .trim();
+        const isMale = maleMarkers.some(m => v.name.includes(m));
+        label += isMale ? ' (男)' : ' (女)';
+        opt.textContent = label;
+        sel.appendChild(opt);
+      });
+    }
+
     // Set saved or default
-    const savedVoice = this._voiceId || TTS_CONF.DEFAULT_VOICE;
-    sel.value = savedVoice;
+    const savedVoice = this._voiceId || 'auto';
+    // Find matching option
+    const match = Array.from(sel.options).find(o => o.value === savedVoice || savedVoice.includes(o.value) || o.value.includes(savedVoice));
+    sel.value = match ? match.value : 'auto';
   }
 
   setVoiceId(id) { this._voiceId = id; }

@@ -40,23 +40,40 @@ export class TtsEngine {
     const voices = this._allVoices;
     if (!voices.length) return;
 
-    if (this._voiceId && this._voiceId !== 'auto') {
-      const match = voices.find(v => v.name === this._voiceId);
-      if (match) { this._voice = match; return; }
+    // Diagnostic (once)
+    if (!this._didLogVoices) {
+      this._didLogVoices = true;
+      const zh = voices.filter(v => v.lang.startsWith('zh'));
+      console.log(`${LOG_PREFIX} [TTS] Available (${zh.length}): ${zh.map(v => v.name).join(', ')}`);
     }
 
-    // 'auto' mode: find best available Chinese neural voice
-    const prefs = [
-      'Microsoft Xiaoxiao', 'Microsoft Yunxi', 'Microsoft Xiaoyi',
-      'Microsoft Yunyang', 'Microsoft Xiaobei', 'Microsoft Huihui',
-    ];
-    for (const p of prefs) {
-      const m = voices.find(v => v.name.includes(p));
-      if (m) { this._voice = m; console.log(`${LOG_PREFIX} [TTS] Voice: ${m.name}`); return; }
+    if (this._voiceId && this._voiceId !== 'auto') {
+      let match = voices.find(v => v.name === this._voiceId);
+      if (!match) match = voices.find(v => v.name.includes(this._voiceId) || this._voiceId.includes(v.name));
+      if (match) {
+        if (this._voice !== match) {
+          this._voice = match;
+          console.log(`${LOG_PREFIX} [TTS] ✓ ${match.name}`);
+        }
+        return;
+      }
     }
-    const zh = voices.find(v => v.lang.startsWith('zh'));
-    if (zh) { this._voice = zh; return; }
-    console.warn(`${LOG_PREFIX} [TTS] No Chinese voice found`);
+
+    // Auto mode or voice not found: pick best neural voice
+    const zh = voices.filter(v => v.lang.startsWith('zh'));
+    const neural = zh.filter(v => v.name.includes('Natural') || v.name.includes('Online'));
+    const pool = neural.length > 0 ? neural : zh;
+
+    // Prefer Xiaoxiao (female) or Yunxi (male) as default, avoid Huihui
+    const preferred = pool.find(v => v.name.includes('晓晓') || v.name.includes('Xiaoxiao')) ||
+                      pool.find(v => v.name.includes('云希') || v.name.includes('Yunxi')) ||
+                      pool.find(v => !v.name.includes('Huihui')) ||
+                      pool[0];
+
+    if (preferred && this._voice !== preferred) {
+      this._voice = preferred;
+      console.log(`${LOG_PREFIX} [TTS] Selected: ${preferred.name}`);
+    }
   }
 
   /**
