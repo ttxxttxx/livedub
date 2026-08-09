@@ -6,7 +6,8 @@ import { YOUTUBE, LOG_PREFIX } from '../../shared/constants.js';
 
 function getVideoId() {
   const m = window.location.href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-  return m ? m[1] : null;
+  if (m) return m[1];
+  try { return window.ytInitialPlayerResponse?.videoDetails?.videoId || null; } catch { return null; }
 }
 
 function getVisibleCaptionText() {
@@ -79,15 +80,20 @@ function cleanCaptionText(el) {
 function enableYouTubeCaptions() {
   try {
     let btn = document.querySelector('.ytp-subtitles-button');
-    if (!btn) {
-      const p = document.querySelector('#movie_player');
-      if (p?.shadowRoot) btn = p.shadowRoot.querySelector('.ytp-subtitles-button');
+    const player = document.querySelector('#movie_player');
+    console.log(`${LOG_PREFIX} [DOM] CC btn:${!!btn} player:${!!player} shadow:${!!player?.shadowRoot}`);
+    if (!btn && player?.shadowRoot) {
+      btn = player.shadowRoot.querySelector('.ytp-subtitles-button');
+      console.log(`${LOG_PREFIX} [DOM] CC shadow btn:${!!btn}`);
     }
-    if (btn && btn.getAttribute('aria-pressed') !== 'true') {
-      btn.click();
-      console.log(`${LOG_PREFIX} [DOM] CC enabled`);
+    if (btn) {
+      console.log(`${LOG_PREFIX} [DOM] CC pressed=${btn.getAttribute('aria-pressed')}`);
+      if (btn.getAttribute('aria-pressed') !== 'true') {
+        btn.click();
+        console.log(`${LOG_PREFIX} [DOM] CC clicked`);
+      }
     }
-  } catch(e) {}
+  } catch(e) { console.warn(`${LOG_PREFIX} [DOM] CC err:`, e); }
 }
 
 /**
@@ -117,30 +123,26 @@ export function startDOMCaptionObserver(video, onText) {
     const MAX_SPOKEN = 50;
     let lastRaw = '';
     let count = 0;
+    let changeN = 0;
 
-    let changeN = 0; // Count every caption change
+    const POLL_MS = 100; // Faster polling (was 150ms)
+    let diagCount = 0;
+    let tickN = 0;
     const timer = setInterval(() => {
+      tickN++;
       const raw = getVisibleCaptionText();
-      const t = video.currentTime;
-      if (video.paused || t < 0.1) return;
+      const t = video.currentTime || 0;
 
-      if (!raw) {
-        // Captions disappeared → flush any pending fragment
-        if (lastRaw && !extractSentences(lastRaw) && lastRaw.length > 15) {
-          const ft = lastRaw.trim();
-          if (!spokenSet.has(ft)) {
-            spokenSet.add(ft);
-            console.log(`${LOG_PREFIX} [DOM] ➤ flush(empty): "${ft.substring(0, 60)}"`);
-            onText({ text: ft, start: t - 2, duration: 2 });
-          }
-        }
-        lastRaw = ''; return;
+      // Diagnostic: log first 10 timer ticks + every 50th after
+      if (tickN <= 10 || tickN % 50 === 0) {
+        console.log(`${LOG_PREFIX} [DOM] tick#${tickN} raw="${raw.substring(0, 80)}" lastRaw="${lastRaw?.substring(0, 40) || '(empty)'}"`);
       }
+
+      if (!raw) { return; } // Wait for caption to reappear — don't clear state
       if (raw === lastRaw) return;
 
-      // Detect caption RESET: new text doesn't extend old text
+      // Detect caption RESET: flush any unspoken old fragment
       if (lastRaw && !raw.startsWith(lastRaw)) {
-        // Old text is being replaced — flush any unspoken fragment
         const oldSentences = extractSentences(lastRaw);
         if (!oldSentences && lastRaw.length > 15) {
           const ft = lastRaw.trim();
@@ -150,17 +152,15 @@ export function startDOMCaptionObserver(video, onText) {
             onText({ text: ft, start: t - 2, duration: 2 });
           }
         }
+        // Fall through — process new raw as normal
       }
 
-      // Log EVERY caption change — compact format
       changeN++;
       lastRaw = raw;
       const sentences = extractSentences(raw);
-      const tag = sentences ? `+${sentences.length}s` : '…'; // +Ns = N sentences, … = no punct
-      console.log(`${LOG_PREFIX} [CC#${changeN} ${tag}] "${raw.substring(0, 100)}"`);
+      if (changeN <= 10) console.log(`${LOG_PREFIX} [DOM] extractSentences: ${JSON.stringify(sentences)}`);
+      if (!sentences) return;
 
-      // Send ALL new complete sentences as one combined block
-      // for better translation context (whole sentences, not fragments)
       const newSentences = [];
       for (const s of sentences) {
         if (spokenSet.has(s)) {
@@ -185,9 +185,19 @@ export function startDOMCaptionObserver(video, onText) {
         }
         onText({ text: combined, start: t, duration: 1 });
       }
-    }, 150);
+    }, POLL_MS);
 
-    console.log(`${LOG_PREFIX} [DOM] Sentence observer started`);
+    // Process immediately — don't wait 100ms for first timer tick
+    const initialRaw = getVisibleCaptionText();
+    console.log(`${LOG_PREFIX} [DOM] Observer started. text="${initialRaw.substring(0, 60)}"`);
+    if (initialRaw) {
+      lastRaw = initialRaw;
+      const initialSentences = extractSentences(initialRaw);
+      if (initialSentences) {
+        initialSentences.forEach(s => { if (s.length > 1) spokenSet.add(s); });
+        onText({ text: initialSentences.join(' '), start: video.currentTime || 0, duration: 1 });
+      }
+    }
     return { stop: () => clearInterval(timer) };
   } catch (e) {
     console.warn(`${LOG_PREFIX} [DOM] Failed:`, e);

@@ -41,8 +41,8 @@ export class TtsEngine {
     if (!voices.length) return;
 
     // Diagnostic (once)
-    if (!this._didLogVoices) {
-      this._didLogVoices = true;
+    if (!window.__livedub_tts_voices_logged) {
+      window.__livedub_tts_voices_logged = true;
       const zh = voices.filter(v => v.lang.startsWith('zh'));
       console.log(`${LOG_PREFIX} [TTS] Available (${zh.length}): ${zh.map(v => v.name).join(', ')}`);
     }

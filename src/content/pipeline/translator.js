@@ -35,6 +35,23 @@ async function translateWithAzure(text, from, to, apiKey, region) {
   return result;
 }
 
+// ─── Google Translate (free unofficial, best quality) ─────────
+
+async function translateWithGoogle(text, from, to) {
+  // Google Translate unofficial API — no key needed
+  const tl = to === 'zh-Hans' ? 'zh-CN' : to;
+  const sl = from;
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
+
+  const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  if (!resp.ok) throw new Error(`Google HTTP ${resp.status}`);
+  const data = await resp.json();
+  // Response format: [[["translated text", "original", ...]], ...]
+  const result = data[0]?.map(part => part[0]).join('');
+  if (!result || result === text) throw new Error('Google empty/same');
+  return result;
+}
+
 // ─── MyMemory (free, no key) ───────────────────────────────────
 
 async function translateWithMyMemory(text, from, to) {
@@ -60,34 +77,40 @@ export async function translate(text, from = 'en', to = 'zh-Hans') {
   if (!text || !text.trim()) return '';
 
   const apiKey = await getStored(STORAGE_KEYS.API_KEY, '');
-  const region = await getStored(STORAGE_KEYS.REGION, API.MS_TRANSLATOR.DEFAULT_REGION);
 
   // Priority 1: MS Translator (if API key configured)
   if (apiKey) {
     for (let i = 0; i <= MAX_RETRIES; i++) {
       try {
-        const result = await translateWithAzure(text, from, to, apiKey, region);
-        console.log(`${LOG_PREFIX} [Azure] "${text.substring(0, 40)}…" → "${result.substring(0, 40)}…"`);
+        const result = await translateWithAzure(text, from, to, apiKey,
+          await getStored(STORAGE_KEYS.REGION, API.MS_TRANSLATOR.DEFAULT_REGION));
+        console.log(`${LOG_PREFIX} [Azure] → "${result.substring(0, 50)}…"`);
         return result;
       } catch (e) {
-        console.warn(`${LOG_PREFIX} [Azure] Attempt ${i + 1} failed:`, e.message);
         if (i < MAX_RETRIES) await sleep(1000 * (i + 1));
       }
     }
-    console.warn(`${LOG_PREFIX} [Azure] All retries failed, falling back to MyMemory`);
   }
 
-  // Priority 2: MyMemory free API
+  // Priority 2: Google Translate (free, best quality)
+  try {
+    const result = await translateWithGoogle(text, from, to);
+    console.log(`${LOG_PREFIX} [Google] → "${result.substring(0, 50)}…"`);
+    return result;
+  } catch (e) {
+    console.warn(`${LOG_PREFIX} [Google] Failed:`, e.message);
+  }
+
+  // Priority 3: MyMemory
   try {
     const result = await translateWithMyMemory(text, from, to);
-    console.log(`${LOG_PREFIX} [MyMemory] "${text.substring(0, 40)}…" → "${result.substring(0, 40)}…"`);
+    console.log(`${LOG_PREFIX} [MyMemory] → "${result.substring(0, 50)}…"`);
     return result;
   } catch (e) {
     console.warn(`${LOG_PREFIX} [MyMemory] Failed:`, e.message);
   }
 
   // Fallback: passthrough
-  console.warn(`${LOG_PREFIX} [Translator] All translation services failed — passthrough`);
   return text;
 }
 

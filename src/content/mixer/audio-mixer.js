@@ -76,6 +76,17 @@ export class AudioMixer {
 
   getMixRatio() { return this._mixRatio; }
 
+  /** Update video reference without full teardown (for SPA navigation) */
+  setVideo(videoElement) {
+    if (this.video === videoElement) return;
+    this.video = videoElement;
+    // Re-init the audio graph with the new video
+    if (this._active) {
+      this.destroy();
+      this.init();
+    }
+  }
+
   mute() {
     if (this._savedRatio === undefined) {
       this._savedRatio = this._mixRatio;

@@ -53,9 +53,6 @@ export class PipelineOrchestrator {
     this._videoStartTime = 0;   // video.currentTime when pipeline started
     this._lastFlushTime = 0;    // Last phrase flush timestamp
 
-    // Audio fallback
-    this._audioCapture = null;  // AudioCapture instance (set by content/index.js)
-
     // Callbacks
     this.onStateChange = null;  // (newState) => void
     this.onPhraseTranslated = null; // ({original, translated, timestamp}) => void
@@ -276,21 +273,22 @@ export class PipelineOrchestrator {
     }
   }
 
-  /**
-   * Callback from AudioCapture when a phrase boundary is detected.
-   * @param {string} phrase — recognized text
-   */
-  async _onAudioPhrase(phrase) {
-    if (this.state === State.IDLE) return;
-    await this._flushPhrase({ text: phrase, start: 0, end: 0 });
-  }
-
   // --- Video event handlers ---
 
   _onVideoPlay() {
     console.log(`${LOG_PREFIX} [Pipeline] Video play`);
     if (this.state !== State.IDLE && this.tts) {
       this.tts.resume();
+    }
+    // Re-enable captions in case they were turned off
+    if (this.video) {
+      setTimeout(() => {
+        const btn = document.querySelector('.ytp-subtitles-button');
+        if (btn && btn.getAttribute('aria-pressed') !== 'true') {
+          btn.click();
+          console.log(`${LOG_PREFIX} [Pipeline] CC re-enabled after play`);
+        }
+      }, 500);
     }
   }
 

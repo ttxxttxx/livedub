@@ -1,18 +1,16 @@
 // LiveDub — Content Script Entry Point
 // Pure IIFE — no imports needed (bundled by esbuild)
 
-import { YOUTUBE, UI, LOG_PREFIX } from '../shared/constants.js';
+import { YOUTUBE, LOG_PREFIX } from '../shared/constants.js';
 import { loadAllSettings, setStored } from '../shared/storage.js';
 import { BubbleUI } from './ui/bubble.js';
 import { PipelineOrchestrator } from './pipeline/orchestrator.js';
 import { AudioMixer } from './mixer/audio-mixer.js';
-import { AudioCapture } from './capture/audio.js';
 
 // ─── Global State ──────────────────────────────────────────────────
 let bubble = null;
 let pipeline = null;
 let mixer = null;
-let audioCapture = null;
 let currentVideo = null;
 let currentVideoId = null;
 let settings = null;
@@ -51,8 +49,6 @@ async function init() {
   console.log(`${LOG_PREFIX} Video element found successfully`);
 
   // Create audio capture
-  audioCapture = new AudioCapture(currentVideo);
-
   // Create the floating bubble UI
   bubble = new BubbleUI({
     onToggle: handleToggle,
@@ -142,26 +138,43 @@ let _adObserver = null;
 
 // ─── SPA Navigation ─────────────────────────────────────────────────
 
+let _lastVideoId = null;
+
 function watchForNavigation() {
-  let lastVideoId = currentVideoId;
+  _lastVideoId = currentVideoId;
 
   // Remove old handler to prevent duplicates
   if (_navHandler) document.removeEventListener('yt-navigate-finish', _navHandler);
 
   _navHandler = () => {
     const newVideoId = getYouTubeVideoId();
-    if (newVideoId && newVideoId !== lastVideoId) {
-      console.log(`${LOG_PREFIX} SPA navigation: ${lastVideoId} → ${newVideoId}`);
+    if (!newVideoId) return;
+
+    // If we weren't on a watch page before, do full init
+    if (!_lastVideoId) {
+      console.log(`${LOG_PREFIX} Navigation to video: ${newVideoId} — full init`);
       if (pipeline) { pipeline.stop(); pipeline = null; }
       if (mixer) { mixer.destroy(); mixer = null; }
-      lastVideoId = newVideoId;
-      currentVideoId = newVideoId;
-      currentVideo = document.querySelector(YOUTUBE.VIDEO_SELECTOR);
-      if (currentVideo) {
-        mixer = new AudioMixer(currentVideo);
-        audioCapture = new AudioCapture(currentVideo);
-        if (bubble && bubble._enabled) startPipeline();
-      }
+      if (bubble) bubble.destroy();
+      window.__livedub_initialized = false;
+      boot();
+      return;
+    }
+
+    // Same video or no change
+    if (newVideoId === _lastVideoId) return;
+
+    // Different video — restart only the pipeline, keep mixer
+    console.log(`${LOG_PREFIX} SPA: ${_lastVideoId} → ${newVideoId}`);
+    if (pipeline) { pipeline.stop(); pipeline = null; }
+    _lastVideoId = newVideoId;
+    currentVideoId = newVideoId;
+    currentVideo = document.querySelector(YOUTUBE.VIDEO_SELECTOR);
+    if (currentVideo) {
+      // Reuse mixer with new video to avoid AudioContext lag
+      if (mixer) { mixer.setVideo(currentVideo); }
+      else { mixer = new AudioMixer(currentVideo); }
+      if (bubble && bubble._enabled) startPipeline();
     }
   };
 
@@ -216,8 +229,6 @@ async function startPipeline() {
       voiceId: settings?.livedub_voice || 'auto',
     },
   });
-
-  pipeline._audioCapture = audioCapture;
 
   pipeline.onStateChange = (state) => {
     const messages = {
@@ -279,30 +290,25 @@ console.log('[LiveDub] 🔥 TOP-LEVEL EXECUTION STARTED');
 
 /**
  * Initialize the extension on the current page if it's a watch page.
+ * Always registers the navigation watcher (even on non-watch pages).
  */
 function boot() {
   if (YOUTUBE.VIDEO_URL_PATTERN.test(window.location.href)) {
     console.log('[LiveDub] URL matches — calling init()');
-    // Prevent double-init
     if (window.__livedub_initialized) return;
     window.__livedub_initialized = true;
-    init().then(() => watchForAds()).catch((e) => {
+    init().then(() => { watchForNavigation(); watchForAds(); }).catch((e) => {
       console.error(`${LOG_PREFIX} Init failed:`, e);
     });
   } else {
     console.log('[LiveDub] Not a watch page:', window.location.href, '(waiting for navigation)');
+    // Still register navigation watcher so we detect when user clicks a video
+    watchForNavigation();
   }
 }
 
 // Initial boot
 boot();
 
-// Listen for YouTube SPA navigation (homepage → video, video → video)
-let _bootNavHandler = null;
-if (_bootNavHandler) document.removeEventListener('yt-navigate-finish', _bootNavHandler);
-_bootNavHandler = () => {
-  console.log('[LiveDub] Navigation detected:', window.location.href);
-  window.__livedub_initialized = false;
-  boot();
-};
-document.addEventListener('yt-navigate-finish', _bootNavHandler);
+// First-boot navigation is handled by watchForNavigation() inside init()
+
