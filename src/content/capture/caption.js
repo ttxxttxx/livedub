@@ -26,14 +26,10 @@ function getEnglishCaptionTrack() {
       tracks = data.captions.playerCaptionsTracklistRenderer.captionTracks;
     }
 
-    // Source 2: ytInitialData (embedded page data)
-    if (!tracks) {
-      data = window.ytInitialData;
-      const contents = data?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
-      // Not standard for captions but worth checking
+    // Source 2: Data from MAIN-world injection
+    if (!tracks && window.__livedub_captions?.playerCaptionsTracklistRenderer?.captionTracks) {
+      tracks = window.__livedub_captions.playerCaptionsTracklistRenderer.captionTracks;
     }
-
-    // Source 3: Data from MAIN-world injection (waitForPlayerResponse)
     if (!tracks && window.__livedub_captions?.playerCaptionsTracklistRenderer?.captionTracks) {
       tracks = window.__livedub_captions.playerCaptionsTracklistRenderer.captionTracks;
     }
@@ -231,42 +227,60 @@ export function startDOMCaptionObserver(video, onText) {
 export function waitForPlayerResponse() {
   return new Promise(resolve => {
     // Fast path
-    if (window.ytInitialPlayerResponse) { resolve(); return; }
+    if (window.ytInitialPlayerResponse) { console.log(`${LOG_PREFIX} [Transcript] ytIPR found`); resolve(); return; }
+    if (window.__livedub_captions) { console.log(`${LOG_PREFIX} [Transcript] cached captions found`); resolve(); return; }
 
-    // Poll in content script context
-    const i = setInterval(() => {
-      if (window.ytInitialPlayerResponse) { clearInterval(i); resolve(); return; }
-    }, 200);
-
-    // Inject MAIN-world script to read the player response directly
-    try {
-      const script = document.createElement('script');
-      script.textContent = `
-        (function() {
-          var check = setInterval(function() {
-            if (window.ytInitialPlayerResponse && window.ytInitialPlayerResponse.captions) {
-              clearInterval(check);
-              window.postMessage({type:'LIVEDUB_PLAYER_RESPONSE', data: window.ytInitialPlayerResponse.captions}, '*');
+    // Inject MAIN-world script: access player.getPlayerResponse()
+    const script = document.createElement('script');
+    script.textContent = `
+      (function() {
+        var attempts = 0;
+        function tryGet() {
+          attempts++;
+          // Method 1: window.ytInitialPlayerResponse
+          if (window.ytInitialPlayerResponse && window.ytInitialPlayerResponse.captions) {
+            window.postMessage({type:'LIVEDUB_CAPTIONS', data: window.ytInitialPlayerResponse.captions}, '*');
+            return;
+          }
+          // Method 2: player.getPlayerResponse()
+          try {
+            var player = document.querySelector('#movie_player');
+            if (player && player.getPlayerResponse) {
+              var resp = player.getPlayerResponse();
+              if (resp && resp.captions) {
+                window.postMessage({type:'LIVEDUB_CAPTIONS', data: resp.captions}, '*');
+                return;
+              }
             }
-          }, 200);
-          setTimeout(function() { clearInterval(check); }, 5000);
-        })();
-      `;
-      document.documentElement.appendChild(script);
-      script.remove();
-
-      const handler = (e) => {
-        if (e.data?.type === 'LIVEDUB_PLAYER_RESPONSE') {
-          window.removeEventListener('message', handler);
-          // Copy data to content script context
-          window.__livedub_captions = e.data.data;
-          clearInterval(i);
-          resolve();
+          } catch(e) {}
+          // Method 3: ytInitialData
+          if (window.ytInitialData && window.ytInitialData.contents) {
+            window.postMessage({type:'LIVEDUB_CAPTIONS', source:'ytInitialData', data: window.ytInitialData}, '*');
+            return;
+          }
+          if (attempts < 40) setTimeout(tryGet, 200);
         }
-      };
-      window.addEventListener('message', handler);
-    } catch(e) { /* ignore, polling will handle it */ }
+        tryGet();
+      })();
+    `;
+    document.documentElement.appendChild(script);
+    script.remove();
 
-    setTimeout(() => { clearInterval(i); resolve(); }, 8000);
+    const handler = (e) => {
+      if (e.data?.type === 'LIVEDUB_CAPTIONS') {
+        window.removeEventListener('message', handler);
+        const data = e.data.data;
+        console.log('[LiveDub] [Transcript] MAIN world got captions:', data?.playerCaptionsTracklistRenderer?.captionTracks?.length || 0, 'tracks');
+        window.__livedub_captions = data;
+        resolve();
+      }
+    };
+    window.addEventListener('message', handler);
+
+    // Timeout fallback
+    setTimeout(() => {
+      window.removeEventListener('message', handler);
+      resolve();
+    }, 8000);
   });
 }

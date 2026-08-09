@@ -146,7 +146,7 @@ function watchForNavigation() {
   // Remove old handler to prevent duplicates
   if (_navHandler) document.removeEventListener('yt-navigate-finish', _navHandler);
 
-  _navHandler = () => {
+  _navHandler = async () => {
     const newVideoId = getYouTubeVideoId();
     if (!newVideoId) return;
 
@@ -171,7 +171,10 @@ function watchForNavigation() {
     currentVideoId = newVideoId;
     currentVideo = document.querySelector(YOUTUBE.VIDEO_SELECTOR);
     if (currentVideo) {
-      // Reuse mixer with new video to avoid AudioContext lag
+      // Reload settings to pick up any voice/language changes
+      settings = await loadAllSettings();
+      if (bubble) bubble.setVoiceId(settings?.livedub_voice || 'auto');
+      // Reuse mixer with new video
       if (mixer) { mixer.setVideo(currentVideo); }
       else { mixer = new AudioMixer(currentVideo); }
       if (bubble && bubble._enabled) startPipeline();
