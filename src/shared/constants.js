@@ -38,7 +38,7 @@ export const TTS = {
   DEFAULT_LANG: 'zh-CN',
   DEFAULT_RATE: 1.5,
   DEFAULT_PITCH: 1.0,
-  DEFAULT_VOLUME: 1.0,
+  DEFAULT_VOLUME: 1.0,  // speechSynthesis max volume
   DEFAULT_VOICE: 'auto', // 'auto' = best available
   // Edge neural Chinese voices — ordered by naturalness
   VOICES: [

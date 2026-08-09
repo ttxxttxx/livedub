@@ -40,10 +40,16 @@ function getVisibleCaptionText() {
  * Extract text from a caption element, removing duplicated words.
  * YouTube sometimes renders words twice in overlapping caption elements.
  */
+/** Filter out caption noise like [music], [applause], etc. */
+function filterNoise(text) {
+  return text.replace(/\[music\]|\[applause\]|\[laughter\]|\[cheering\]|\[inaudible\]/gi, '').trim();
+}
+
 function cleanCaptionText(el) {
   let text = el.textContent || '';
   text = text.replace(/<[^>]+>/g, '');
   text = text.replace(/\s+/g, ' ').trim();
+  text = filterNoise(text);
   if (!text) return '';
 
   const words = text.split(' ');
