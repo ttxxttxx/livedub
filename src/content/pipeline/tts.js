@@ -91,12 +91,11 @@ export class TtsEngine {
         return;
       }
 
-      // Queue management: if >5 pending, skip oldest to prevent
-      // cascading delay (one-way broadcast, better to skip than lag)
-      if (this._pendingCount > 5) {
+      // Queue management: don't let queue grow unbounded
+      if (this._pendingCount > 3) {
         speechSynthesis.cancel();
         this._pendingCount = 0;
-        console.log(`${LOG_PREFIX} [TTS] Queue purged (>5 pending)`);
+        console.log(`${LOG_PREFIX} [TTS] Queue reset (>3 pending)`);
       }
 
       this._pendingCount++;

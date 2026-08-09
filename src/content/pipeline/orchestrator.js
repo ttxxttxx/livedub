@@ -1,352 +1,196 @@
 // LiveDub — Pipeline Orchestrator
-// Coordinates the entire translation pipeline:
-//   Caption Extraction → Phrase Boundary Detection → Translation → TTS
-//
-// State machine:
-//   IDLE → WAITING → CAPTURING → TRANSLATING → SPEAKING → CAPTURING ...
-//
-// Also handles the audio fallback path when captions are unavailable.
+// Transcript-First: timedtext data → batch translate → timed TTS playback
+// DOM fallback when timedtext unavailable
 
 import { TRANSLATION, LOG_PREFIX } from '../../shared/constants.js';
 import { extractCaptions, segmentsToPhrases, waitForPlayerResponse, startDOMCaptionObserver } from '../capture/caption.js';
 import { translate, hasApiKey } from './translator.js';
 import { TtsEngine } from './tts.js';
 
-// Orchestrator states
-const State = {
-  IDLE: 'idle',
-  WAITING: 'waiting',       // Waiting for video/captions to be ready
-  CAPTURING: 'capturing',   // Extracting caption segments
-  TRANSLATING: 'translating',
-  SPEAKING: 'speaking',
-};
+const State = { IDLE: 'idle', WAITING: 'waiting', RUNNING: 'running' };
 
 export class PipelineOrchestrator {
-  /**
-   * @param {object} options
-   * @param {HTMLVideoElement} options.videoElement — the YouTube video element
-   * @param {object} [options.config] — initial config overrides
-   */
   constructor({ videoElement, config = {} }) {
     this.video = videoElement;
     this.state = State.IDLE;
-    this.config = {
-      fromLang: config.fromLang || TRANSLATION.FROM_LANG,
-      toLang: config.toLang || TRANSLATION.TO_LANG,
-      ...config,
-    };
+    this.config = { fromLang: config.fromLang || 'en', toLang: config.toLang || 'zh-Hans' };
+    this.tts = new TtsEngine({ volume: config.ttsVolume, rate: config.ttsRate, voiceId: config.voiceId });
 
-    // Components
-    this.tts = new TtsEngine({
-      volume: config.ttsVolume,
-      rate: config.ttsRate,
-      voiceId: config.voiceId || 'auto',
-    });
+    this._phrases = [];          // [{text, start, end}] — all phrases to speak
+    this._phraseIdx = 0;        // current phrase index
+    this._translated = new Map(); // index → translated text cache
+    this._videoStartTime = 0;
+    this._startRealTime = 0;
+    this._domObserver = null;
+    this._tickId = null;
 
-    // Caption data
-    this._allSegments = [];     // All parsed caption segments
-    this._phrases = [];         // Segments grouped into phrases
-    this._phraseIndex = 0;      // Current position in phrases array
+    this.onStateChange = null;
+    this.onError = null;
+    this.onPhraseTranslated = null;
 
-    // Timing
-    this._startTime = 0;        // When the pipeline started (performance.now() ref)
-    this._videoStartTime = 0;   // video.currentTime when pipeline started
-    this._lastFlushTime = 0;    // Last phrase flush timestamp
-
-    // Callbacks
-    this.onStateChange = null;  // (newState) => void
-    this.onPhraseTranslated = null; // ({original, translated, timestamp}) => void
-    this.onError = null;        // (error) => void
-
-    // Bound methods
-    this._onVideoPlay = this._onVideoPlay.bind(this);
-    this._onVideoPause = this._onVideoPause.bind(this);
-    this._onVideoSeek = this._onVideoSeek.bind(this);
-    this._onVideoEnded = this._onVideoEnded.bind(this);
+    this._onPlay = () => { this.tts?.resume(); };
+    this._onPause = () => { this.tts?.pause(); };
+    this._onSeeked = () => { this._phraseIdx = this._findPhraseIndex(this.video.currentTime); this.tts?.stop(); };
+    this._onEnded = () => this.stop();
   }
 
-  /**
-   * Start the translation pipeline.
-   * @returns {Promise<void>}
-   */
-  async start() {
-    if (this.state !== State.IDLE) {
-      console.warn(`${LOG_PREFIX} [Pipeline] Cannot start — already running (state: ${this.state})`);
-      return;
-    }
+  // ── Start ──────────────────────────────────────────────────
 
+  async start() {
+    if (this.state !== State.IDLE) return;
     console.log(`${LOG_PREFIX} [Pipeline] Starting...`);
     this._setState(State.WAITING);
 
-    // Bind video events
-    this.video.addEventListener('play', this._onVideoPlay);
-    this.video.addEventListener('pause', this._onVideoPause);
-    this.video.addEventListener('seeked', this._onVideoSeek);
-    this.video.addEventListener('ended', this._onVideoEnded);
+    this.video.addEventListener('play', this._onPlay);
+    this.video.addEventListener('pause', this._onPause);
+    this.video.addEventListener('seeked', this._onSeeked);
+    this.video.addEventListener('ended', this._onEnded);
 
-    // Check if API key is configured
-    const hasKey = await hasApiKey();
-    if (!hasKey) {
-      console.warn(`${LOG_PREFIX} [Pipeline] No API key configured — mock mode (TTS reads English text directly)`);
-    }
-
-    // Try primary path: YouTube captions
-    let captionsAvailable = false;
-
+    // Try Transcript-First
+    let captionsOk = false;
     try {
       await waitForPlayerResponse();
       const segments = await extractCaptions();
-
-      if (segments && segments.length > 0) {
-        this._allSegments = segments;
+      if (segments?.length) {
         this._phrases = segmentsToPhrases(segments);
-        this._phraseIndex = 0;
-        this._videoStartTime = this.video.currentTime;
-        this._lastFlushTime = this._videoStartTime;
-        captionsAvailable = true;
-
-        console.log(`${LOG_PREFIX} [Pipeline] Caption path active: ${segments.length} segments → ${this._phrases.length} phrases`);
+        captionsOk = true;
+        console.log(`${LOG_PREFIX} [Pipeline] Transcript: ${segments.length} segs → ${this._phrases.length} phrases`);
       }
-    } catch (e) {
-      console.warn(`${LOG_PREFIX} [Pipeline] Caption extraction failed:`, e);
-    }
+    } catch (e) { console.warn(`${LOG_PREFIX} [Pipeline] Transcript failed:`, e); }
 
-    if (!captionsAvailable) {
-      // Try DOM-based live caption observation as last resort
-      console.log(`${LOG_PREFIX} [Pipeline] Trying DOM caption observer...`);
-
-      try {
-        const observer = startDOMCaptionObserver(this.video, (segment) => {
-          if (this.state === State.IDLE) return;
-          this._flushPhrase(segment); // Don't await — let browser queue naturally
-        });
-
-        if (observer) {
-          this._domObserver = observer;
-          console.log(`${LOG_PREFIX} [Pipeline] DOM caption observer active`);
-          captionsAvailable = true; // proceed to the loop
-        } else {
-          console.error(`${LOG_PREFIX} [Pipeline] No English captions available for this video`);
-          if (this.onError) {
-            this.onError(new Error('此视频没有英文字幕，无法翻译。\n请确认视频已开启英文字幕 (CC 按钮)。'));
-          }
-          this.stop();
-          return;
-        }
-      } catch (e) {
-        console.error(`${LOG_PREFIX} [Pipeline] DOM observer failed:`, e);
-        this.stop();
-        return;
+    if (!captionsOk) {
+      // Fallback to DOM
+      console.log(`${LOG_PREFIX} [Pipeline] Falling back to DOM observer`);
+      this._domObserver = startDOMCaptionObserver(this.video, seg => {
+        if (this.state === State.IDLE) return;
+        this._phrases.push({ text: seg.text, start: seg.start, end: seg.start + (seg.duration || 2) });
+      });
+      if (!this._domObserver) {
+        if (this.onError) this.onError(new Error('此视频无英文字幕'));
+        this.stop(); return;
       }
+      // Wait a moment for DOM captions to start accumulating
+      await new Promise(r => setTimeout(r, 1000));
     }
 
-    // Start processing
-    this._setState(State.CAPTURING);
-    this._startTime = performance.now();
+    this._videoStartTime = this.video.currentTime;
+    this._startRealTime = performance.now();
+    this._setState(State.RUNNING);
 
-    if (captionsAvailable && this._phrases.length > 0) {
-      this._processCaptionLoop();
-    } else if (!captionsAvailable) {
-      // Nothing to do — stop was already called
-    } else {
-      console.log(`${LOG_PREFIX} [Pipeline] Live DOM mode (observer-driven, no timed loop)`);
-    }
+    // Start playback loop (timed for transcript, polling for DOM)
+    this._tick();
+    // Start background translation
+    this._translateAhead();
   }
 
-  /**
-   * Stop the pipeline, flush remaining items, and restore original state.
-   */
   stop() {
-    console.log(`${LOG_PREFIX} [Pipeline] Stopping...`);
-
-    // Unbind video events
-    this.video.removeEventListener('play', this._onVideoPlay);
-    this.video.removeEventListener('pause', this._onVideoPause);
-    this.video.removeEventListener('seeked', this._onVideoSeek);
-    this.video.removeEventListener('ended', this._onVideoEnded);
-
-    // Stop DOM caption observer
-    if (this._domObserver) {
-      this._domObserver.stop();
-      this._domObserver = null;
-    }
-
-    // Stop TTS
+    this.video.removeEventListener('play', this._onPlay);
+    this.video.removeEventListener('pause', this._onPause);
+    this.video.removeEventListener('seeked', this._onSeeked);
+    this.video.removeEventListener('ended', this._onEnded);
+    if (this._domObserver) { this._domObserver.stop(); this._domObserver = null; }
+    if (this._tickId) { cancelAnimationFrame(this._tickId); this._tickId = null; }
     this.tts.stop();
-    if (this._audioCapture) {
-      this._audioCapture.stop();
-    }
-
     this._setState(State.IDLE);
     console.log(`${LOG_PREFIX} [Pipeline] Stopped`);
   }
 
-  /**
-   * Main processing loop for the caption path.
-   * Runs on a timer, checking the video's currentTime against phrase boundaries.
-   */
-  _processCaptionLoop() {
+  // ── Playback loop ──────────────────────────────────────────
+
+  _tick() {
     if (this.state === State.IDLE) return;
-
     const now = performance.now();
-    const elapsed = (now - this._startTime) / 1000; // seconds since start
-    const currentVideoTime = this._videoStartTime + elapsed;
+    const elapsed = (now - this._startRealTime) / 1000;
+    const videoTime = this._videoStartTime + elapsed;
 
-    // Find phrases whose end time has passed
-    while (this._phraseIndex < this._phrases.length) {
-      const phrase = this._phrases[this._phraseIndex];
-
-      // If the phrase should have started playing by now (with a small lead)
-      if (phrase.start <= currentVideoTime) {
-        // Check if we should flush (phrase has ended)
-        if (phrase.end <= currentVideoTime) {
-          this._flushPhrase(phrase);
-          this._phraseIndex++;
-        } else if (this.video.paused) {
-          // Video paused mid-phrase — wait
-          break;
-        } else {
-          // Phrase is currently "active" — wait for next tick
-          break;
-        }
+    // Flush phrases whose time has come
+    while (this._phraseIdx < this._phrases.length) {
+      const p = this._phrases[this._phraseIdx];
+      if (p.start <= videoTime) {
+        this._flushPhrase(p);
+        this._phraseIdx++;
       } else {
-        // Phrase hasn't started yet — wait
         break;
       }
     }
 
-    // Check if we're done
-    if (this._phraseIndex >= this._phrases.length) {
-      console.log(`${LOG_PREFIX} [Pipeline] All phrases processed`);
-      // Continue polling in case more captions load (live streams)
-    }
+    this._tickId = requestAnimationFrame(() => this._tick());
+  }
 
-    // Schedule next tick
-    if (this.state !== State.IDLE) {
-      this._tickTimer = requestAnimationFrame(() => this._processCaptionLoop());
+  _findPhraseIndex(videoTime) {
+    for (let i = this._phrases.length - 1; i >= 0; i--) {
+      if (this._phrases[i].start <= videoTime) return i;
+    }
+    return 0;
+  }
+
+  // ── Background translation ─────────────────────────────────
+
+  async _translateAhead() {
+    const BATCH = 5;
+    while (this.state !== State.IDLE) {
+      // Find next untranslated phrase within ~30s ahead
+      const videoTime = this.video?.currentTime || 0;
+      let batch = [];
+      for (let i = this._phraseIdx; i < this._phrases.length && batch.length < BATCH; i++) {
+        const p = this._phrases[i];
+        if (!this._translated.has(i) && p.start <= videoTime + 30) {
+          batch.push({ idx: i, text: p.text });
+        }
+      }
+      if (batch.length === 0) {
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+
+      // Translate batch
+      const texts = batch.map(b => b.text);
+      try {
+        const results = await Promise.all(texts.map(t => translate(t, this.config.fromLang, this.config.toLang)));
+        batch.forEach((b, j) => {
+          this._translated.set(b.idx, results[j] || b.text);
+        });
+      } catch (e) {
+        console.warn(`${LOG_PREFIX} [Pipeline] Batch translate failed:`, e);
+      }
+      await new Promise(r => setTimeout(r, 200));
     }
   }
 
-  /**
-   * Flush a phrase: translate → TTS.
-   * @param {{text: string, start: number, end: number}} phrase
-   */
+  // ── Flush ──────────────────────────────────────────────────
+
   async _flushPhrase(phrase) {
     const text = phrase.text.trim();
-    if (!text) return;
+    if (!text || text.length < 2) return;
 
-    console.log(`${LOG_PREFIX} [Pipeline] Flushing phrase: "${text.substring(0, 60)}${text.length > 60 ? '…' : ''}"`);
+    // Get translation (from cache or translate now)
+    const idx = this._phraseIdx; // current phrase being flushed
+    let translated = this._translated.get(idx);
+    if (!translated) {
+      try {
+        translated = await translate(text, this.config.fromLang, this.config.toLang);
+      } catch { translated = text; }
+    }
 
-    try {
-      this._setState(State.TRANSLATING);
+    if (this.state === State.IDLE) return;
 
-      const translated = await translate(
-        text,
-        this.config.fromLang,
-        this.config.toLang
-      );
+    if (this.onPhraseTranslated) {
+      this.onPhraseTranslated({ original: text, translated, timestamp: phrase.start });
+    }
 
-      if (this.state === State.IDLE) return; // Stopped during translation
+    await this.tts.speak(translated);
+  }
 
-      if (this.onPhraseTranslated) {
-        this.onPhraseTranslated({
-          original: text,
-          translated,
-          timestamp: phrase.start,
-        });
-      }
+  // ── Helpers ────────────────────────────────────────────────
 
-      this._setState(State.SPEAKING);
-      await this.tts.speak(translated);
-
-      this._lastFlushTime = phrase.end;
-      if (this.state !== State.IDLE) {
-        this._setState(State.CAPTURING);
-      }
-    } catch (e) {
-      console.error(`${LOG_PREFIX} [Pipeline] Phrase flush error:`, e);
-      if (this.onError) this.onError(e);
-      // Continue — don't stop the pipeline on individual phrase errors
-      if (this.state !== State.IDLE) {
-        this._setState(State.CAPTURING);
-      }
+  _setState(s) {
+    if (this.state !== s) {
+      const old = this.state; this.state = s;
+      if (this.onStateChange) this.onStateChange(s);
     }
   }
 
-  // --- Video event handlers ---
-
-  _onVideoPlay() {
-    console.log(`${LOG_PREFIX} [Pipeline] Video play`);
-    if (this.state !== State.IDLE && this.tts) {
-      this.tts.resume();
-    }
-    // Re-enable captions in case they were turned off
-    if (this.video) {
-      setTimeout(() => {
-        const btn = document.querySelector('.ytp-subtitles-button');
-        if (btn && btn.getAttribute('aria-pressed') !== 'true') {
-          btn.click();
-          console.log(`${LOG_PREFIX} [Pipeline] CC re-enabled after play`);
-        }
-      }, 500);
-    }
-  }
-
-  _onVideoPause() {
-    console.log(`${LOG_PREFIX} [Pipeline] Video pause`);
-    if (this.tts) {
-      this.tts.pause();
-    }
-  }
-
-  _onVideoSeek() {
-    console.log(`${LOG_PREFIX} [Pipeline] Video seek — resetting phrase index`);
-    // Reset to the correct phrase after seek
-    const currentTime = this.video.currentTime;
-    this._startTime = performance.now();
-    this._videoStartTime = currentTime;
-
-    // Find the closest phrase before current time
-    this._phraseIndex = 0;
-    for (let i = this._phrases.length - 1; i >= 0; i--) {
-      if (this._phrases[i].start <= currentTime) {
-        this._phraseIndex = i;
-        break;
-      }
-    }
-
-    // Clear TTS queue
-    this.tts.stop();
-  }
-
-  _onVideoEnded() {
-    console.log(`${LOG_PREFIX} [Pipeline] Video ended`);
-    this.stop();
-  }
-
-  // --- Helpers ---
-
-  _setState(newState) {
-    if (this.state !== newState) {
-      const oldState = this.state;
-      this.state = newState;
-      console.log(`${LOG_PREFIX} [Pipeline] State: ${oldState} → ${newState}`);
-      if (this.onStateChange) {
-        this.onStateChange(newState);
-      }
-    }
-  }
-
-  /**
-   * Get pipeline stats for debugging/dashboard.
-   */
   getStats() {
-    return {
-      state: this.state,
-      totalPhrases: this._phrases.length,
-      processedPhrases: this._phraseIndex,
-      pendingCount: this.tts.pendingCount,
-      mode: this._allSegments.length > 0 ? 'captions' : 'audio-asr',
-    };
+    return { state: this.state, totalPhrases: this._phrases.length, processed: this._phraseIdx, pending: this.tts.pendingCount };
   }
 }
